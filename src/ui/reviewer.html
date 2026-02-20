@@ -1,0 +1,1367 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>RRT - Revisão de Tecidos</title>
+<link href="https://fonts.googleapis.com/css?family=Roboto:400,500,700&display=swap" rel="stylesheet">
+<style>
+/* ============================================
+   VARIÁVEIS CSS (Design System)
+   ============================================ */
+:root{
+  --blue:#0a84ff;
+  --blue-600:#066dd6;
+  --green:#16a34a;
+  --danger:#ea4335;
+  --warning:#f59e0b;
+  --muted:#6b7280;
+  --card:#ffffff;
+  --bg:#f5f6f8;
+  --glass: rgba(255,255,255,0.72);
+  --radius:14px;
+  --shadow: 0 10px 28px rgba(14,30,37,0.06);
+  --glass-border: rgba(15,23,42,0.04);
+  --soft: #f3f6fb;
+}
+
+/* ============================================
+   RESET E BASE
+   ============================================ */
+*{box-sizing:border-box}
+html,body{height:100%;margin:0;background:var(--bg);font-family:Roboto,Arial,sans-serif;color:#111;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
+a{color:inherit;text-decoration:none}
+
+/* ============================================
+   LAYOUT E CONTAINERS
+   ============================================ */
+.container{max-width:1100px;margin:28px auto;padding:20px}
+.wrap {
+  background: var(--card);
+  border-radius:var(--radius);
+  padding:22px;
+  box-shadow:var(--shadow);
+  border:1px solid var(--glass-border);
+  transition: transform .18s ease, box-shadow .18s ease;
+}
+.wrap:hover { transform: translateY(-2px); box-shadow: 0 16px 36px rgba(14,30,37,0.08); }
+
+/* ============================================
+   HEADER E LOGO
+   ============================================ */
+.header {display:flex;align-items:center;gap:14px;margin-bottom:14px}
+.logo {
+  width:64px;height:64px;border-radius:12px;display:flex;align-items:center;justify-content:center;
+  background: linear-gradient(135deg,var(--blue),#3db0ff); color:#fff; font-weight:700; font-size:18px;
+  box-shadow: 0 6px 18px rgba(10,132,255,0.12);
+  flex: 0 0 64px; overflow:hidden;
+}
+.logo img{ width:100%; height:100%; object-fit:contain; display:block; border-radius:10px; }
+.title-wrap { flex:1 }
+h1{ margin:0; font-size:18px; color:var(--blue); font-weight:700 }
+.sub { color:var(--muted); font-size:13px; margin-top:4px }
+
+/* ============================================
+   SEÇÕES E TÍTULOS
+   ============================================ */
+.section-row {display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:18px;margin-bottom:8px}
+h2.section{font-size:14px;margin:0;padding:0;color:var(--blue);font-weight:700}
+
+/* ============================================
+   FORMULÁRIOS E CONTROLES
+   ============================================ */
+label{display:block;font-weight:700;margin-top:12px;color:#222;font-size:13px}
+small.hint{display:block;color:var(--muted);font-weight:400;margin-top:6px;font-size:12px}
+input[type="text"], input[type="number"], select, textarea {
+  width:100%; padding:10px 12px; margin-top:8px; border-radius:10px; border:1px solid #e6eef9; box-sizing:border-box;
+  font-size:14px; background:#fcfdff; transition: box-shadow .14s, border-color .14s;
+}
+input[type="file"]{ margin-top:8px; }
+input:focus, select:focus, textarea:focus{ outline:none; box-shadow:0 10px 30px rgba(10,132,255,0.08); border-color:var(--blue) }
+input:invalid, select:invalid { border-color: var(--danger); }
+.two-cols{ display:flex; gap:12px; margin-top:8px }
+.two-cols > div{ flex:1; min-width:140px }
+
+/* ============================================
+   ÁREA DE DEFEITOS
+   ============================================ */
+#defect-inputs{ border:1px solid #e8f5ff; background:linear-gradient(180deg,#fbfdff,#fcfeff); padding:14px; border-radius:12px }
+.defect-list{ margin-top:14px }
+.defect-card{
+  display:flex; gap:14px; align-items:flex-start; padding:12px; border-radius:12px; background:#fff; border:1px solid #eef6ff;
+  margin-bottom:12px; transition: transform .12s ease, box-shadow .12s ease;
+}
+.defect-card:hover { transform: translateY(-4px); box-shadow: 0 12px 24px rgba(10,132,255,0.04); }
+.defect-thumb{ width:96px; height:96px; object-fit:cover; border-radius:10px; border:1px solid #e6eef0; background:#fafafa }
+.defect-meta{ flex:1 }
+.defect-actions{ display:flex; gap:8px; align-items:center; margin-left:8px; flex-shrink:0 }
+
+/* ============================================
+   BOTÕES
+   ============================================ */
+.btn-row{ display:flex; gap:10px; margin-top:18px; flex-wrap:wrap; align-items:center }
+button { padding:10px 14px; border-radius:10px; border:none; cursor:pointer; font-weight:700; display:inline-flex; align-items:center; gap:8px; transition: all .14s ease; }
+button:disabled { opacity:0.6; cursor:not-allowed; }
+.btn-primary{ background:var(--blue); color:#fff; box-shadow: 0 8px 24px rgba(10,132,255,0.08) }
+.btn-primary:hover:not(:disabled) { background:var(--blue-600); }
+.btn-ghost{ background:#f6f8fb; color:#111 }
+.btn-ghost:hover:not(:disabled) { background:#e8ecf1; }
+.btn-danger{ background:var(--danger); color:#fff }
+.btn-danger:hover:not(:disabled) { background:#d32f2f; }
+.small{ padding:8px 10px; font-size:13px; border-radius:8px }
+button:active:not(:disabled) { transform: translateY(1px) scale(.998); transition: transform .06s; }
+.icon { width:18px; height:18px; display:inline-block; vertical-align:middle }
+
+/* ============================================
+   LOADER E TOAST (FEEDBACK UI)
+   ============================================ */
+#loader { display:none; position:fixed; inset:0; background:rgba(255,255,255,0.7); z-index:9999; align-items:center; justify-content:center; backdrop-filter: blur(2px); }
+.spinner { width:56px;height:56px;border:7px solid #f3f4f6;border-top-color:var(--blue);border-radius:50%;animation:spin 1s linear infinite }
+@keyframes spin{ to{ transform:rotate(360deg) } }
+.toast { position:fixed; right:20px; top:20px; background:var(--green); color:#fff; padding:12px 16px; border-radius:10px; box-shadow:0 12px 36px rgba(0,0,0,0.12); transform:translateY(-8px); opacity:0; pointer-events:none; transition:all .28s; z-index:10000; max-width:400px; word-wrap:break-word; }
+.toast.show{ transform:translateY(0); opacity:1; pointer-events:auto }
+
+/* ============================================
+   BARRA DE PROGRESSO
+   ============================================ */
+.progress-wrap{ margin-top:12px; background:#eef6ff; border-radius:8px; overflow:hidden; height:12px; display:none }
+.progress-bar{ height:100%; width:0%; background:linear-gradient(90deg,var(--blue),#3db0ff); transition:width .2s ease }
+
+/* ============================================
+   RESPONSIVIDADE
+   ============================================ */
+@media (max-width:980px){
+  .header{gap:12px}
+  .logo{width:56px;height:56px}
+  .wrap{ padding:18px }
+}
+@media (max-width:720px){
+  .two-cols{ flex-direction:column }
+  .defect-card{ flex-direction:column; align-items:flex-start }
+  .defect-thumb{ width:100%; height:auto; aspect-ratio: 4 / 3 }
+  .defect-actions{ width:100%; justify-content:flex-start; margin-top:8px }
+  .btn-row{ flex-direction:column; align-items:stretch }
+  .toast { right:10px; left:10px; max-width:none; }
+}
+
+/* ============================================
+   FOOTER
+   ============================================ */
+.footer { margin-top:18px; color:var(--muted); font-size:13px; text-align:right; display:flex; justify-content:space-between; align-items:center; gap:12px }
+.footer .meta { color:var(--muted); font-size:13px }
+.version { font-weight:700; color:var(--blue) }
+
+</style>
+</head>
+<body>
+<!-- ============================================
+     ELEMENTOS DE UI (Loader, Toast)
+     ============================================ -->
+<div id="loader" role="status" aria-live="polite"><div class="spinner" aria-hidden="true"></div></div>
+<div id="toast" class="toast" role="alert" aria-live="assertive"></div>
+
+<div class="container">
+  <div class="wrap" role="main" aria-labelledby="mainTitle">
+    <!-- ============================================
+         HEADER
+         ============================================ -->
+    <div class="header" role="banner">
+      <div class="logo" aria-hidden="true">
+        <img src="data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/7QBQUGhvdG9zaG9wIDMuMAA4QklNBAQAAAA...restante..."
+           alt="3W Lamfer"
+           style="height:70px; margin-bottom:16px;" />
+      </div>
+      <div class="title-wrap">
+        <h1 id="mainTitle">📋 RRT — Revisão de Tecidos</h1>
+        <div class="sub">Preencha os dados do rolo, registre defeitos com foto e envie para processamento.</div>
+      </div>
+      <div style="flex-shrink:0;text-align:right">
+        <div class="version">v3.2</div>
+        <div class="sub" style="text-align:right;margin-top:6px">Sistema • 3W Lamfer</div>
+      </div>
+    </div>
+
+    <!-- ============================================
+         SEÇÃO 1 - IDENTIFICAÇÃO
+         ============================================ -->
+    <div class="section-row">
+      <h2 class="section">Seção 1 — Identificação</h2>
+      <div class="sub">Campos obrigatórios serão validados antes do envio</div>
+    </div>
+
+    <label for="responsavel">Responsável pela Revisão <span style="color:var(--danger)">*</span></label>
+    <select id="responsavel" aria-label="Responsável pela Revisão" required>
+      <option value="">Selecione o Revisor</option>
+      <option>Renan Souza da Cruz</option>
+      <option>Carlos Eduardo Inacio Barbosa</option>
+      <option>Mateus Camargo Pereira da Silva</option>
+    </select>
+
+    <label for="fornecedor">Fornecedor <span style="color:var(--danger)">*</span></label>
+    <input id="fornecedor" type="text" placeholder="Nome do Fornecedor" required oninput="this.value=this.value.toUpperCase()" maxlength="200">
+
+    <div class="two-cols" style="margin-top:6px">
+      <div>
+        <label for="nf">Nº da Nota Fiscal <span style="color:var(--danger)">*</span></label>
+        <input id="nf" type="text" placeholder="Ex: 123456" inputmode="numeric" required oninput="this.value=this.value.replace(/\D+/g,'')" maxlength="20">
+        <small class="hint">Apenas números — mantenha sem pontos</small>
+      </div>
+      <div>
+        <label for="codigo_linx">Código LINX</label>
+        <input id="codigo_linx" type="text" placeholder="Ex: 12345.678" oninput="this.value=this.value.replace(/[^0-9.]+/g,'')" maxlength="50">
+        <small class="hint">Formato: números e ponto</small>
+      </div>
+    </div>
+
+    <div class="two-cols">
+      <div>
+        <label for="lote">Lote <span style="color:var(--danger)">*</span></label>
+        <input id="lote" type="text" placeholder="Ex: 1234" required oninput="this.value=this.value.replace(/\D+/g,'')" maxlength="50">
+      </div>
+      <div>
+        <label for="numero_peca">Nº da Peça <span style="color:var(--danger)">*</span></label>
+        <input id="numero_peca" type="text" placeholder="Ex: 98765" required oninput="this.value=this.value.replace(/\D+/g,'')" maxlength="50">
+      </div>
+    </div>
+
+    <label for="referencia">Referência do Tecido <span style="color:var(--danger)">*</span></label>
+    <input id="referencia" type="text" placeholder="Ex: 001234" required oninput="this.value=this.value.replace(/\D+/g,'')" maxlength="50">
+
+    <!-- ============================================
+         SEÇÃO 2 - DADOS DO TECIDO
+         ============================================ -->
+    <h2 class="section" style="margin-top:18px">Seção 2 — Dados do Tecido</h2>
+
+    <div class="two-cols">
+      <div>
+        <label for="cor">Cor do Tecido <span style="color:var(--danger)">*</span></label>
+        <input id="cor" type="text" placeholder="EX: PRETO ou 001" required oninput="this.value=this.value.toUpperCase()" maxlength="100">
+      </div>
+      <div>
+        <label for="tipo_tecido">Tipo do Tecido <span style="color:var(--danger)">*</span></label>
+        <input id="tipo_tecido" type="text" placeholder="Ex: Crepe, Algodão" required oninput="this.value=this.value.toUpperCase()" maxlength="100">
+      </div>
+    </div>
+
+    <label for="localizacao">Localização <span style="color:var(--danger)">*</span></label>
+    <input id="localizacao" type="text" placeholder="EX: ALMOX-A" required oninput="this.value=this.value.toUpperCase()" maxlength="100">
+
+    <!-- ============================================
+         SEÇÃO 3 - REGISTRAR DEFEITOS
+         ============================================ -->
+    <h2 class="section" style="margin-top:18px">Seção 3 — Registrar Defeitos (opcional)</h2>
+
+    <div id="defect-inputs">
+      <label for="input_tipo">Tipo de Defeito</label>
+      <div style="display:flex;gap:8px;align-items:center">
+        <select id="input_tipo_select" style="flex:1">
+          <option value="">-- Selecionar --</option>
+          <option>Mancha</option>
+          <option>Listras Tortas</option>
+          <option>Tecido Desfiado</option>
+          <option>Tecido com Buraco</option>
+          <option>Fiapos</option>
+          <option>Diferença de Tonalidade</option>
+          <option>Tecido Amarelado</option>
+          <option>Trama Mole</option>
+          <option>Emendas</option>
+          <option>Tecido Rasgado</option>
+          <option>Furo Maior que 10cm</option>
+          <option>Falha no Desenho</option>
+          <option>Aureulas Tortas</option>
+          <option>Vinco</option>
+          <option>Tecido Sujo</option>
+          <option>Defeito na Estampa</option>
+          <option>Mancha de Óleo</option>
+          <option value="__OUTRO__">Outro...</option>
+        </select>
+        <input id="input_tipo_text" type="text" placeholder="Se 'Outro', escreva aqui" style="flex:1;display:none" oninput="this.value=this.value.toUpperCase()" maxlength="200">
+      </div>
+
+      <div class="two-cols">
+        <div>
+          <label for="input_mi">Metro Inicial (m)</label>
+          <input id="input_mi" type="number" step="0.1" min="0" placeholder="Ex: 15.5">
+        </div>
+        <div>
+          <label for="input_mf">Metro Final (m)</label>
+          <input id="input_mf" type="number" step="0.1" min="0" placeholder="Ex: 16.0">
+        </div>
+      </div>
+
+      <label for="input_file">Foto do defeito (JPEG/PNG) — preview</label>
+      <input id="input_file" type="file" accept="image/jpeg,image/png" capture="camera">
+      <small class="hint">Tamanho máximo: 10MB. Formatos aceitos: JPEG, PNG</small>
+
+      <div class="muted" style="margin-top:8px;padding:10px;background:#fff3cd;border-radius:8px;border:1px solid #ffc107;color:#856404;font-size:12px">
+        ⚠️ Você pode adicionar defeitos sem foto, mas deve enviar foto(s) antes do envio final. Use o botão 'Enviar Foto' em cada defeito para subir a imagem.
+      </div>
+
+      <div class="btn-row" style="margin-top:12px">
+        <button class="btn-primary small" type="button" id="addDefectBtn">
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path fill="#fff" d="M19 11h-6V5h-2v6H5v2h6v6h2v-6h6z"/></svg>
+          Adicionar Defeito
+        </button>
+        <button class="btn-ghost small" type="button" id="clearDefectsBtn">♻️ Limpar lista</button>
+      </div>
+    </div>
+
+    <div id="defect-list" class="defect-list" aria-live="polite" style="margin-top:12px"></div>
+
+    <!-- ============================================
+         SEÇÃO 4 - PESAGEM, METRAGEM E STATUS
+         ============================================ -->
+    <h2 class="section" style="margin-top:18px">Seção 4 — Pesagem, Metragem e Status</h2>
+
+    <div class="two-cols">
+      <div>
+        <label for="largura_cm">Largura (cm) <span style="color:var(--danger)">*</span></label>
+        <input id="largura_cm" type="number" step="0.01" min="0" required placeholder="Largura em cm">
+      </div>
+      <div>
+        <label for="metros_maquina">Metros (Máquina) <span style="color:var(--danger)">*</span></label>
+        <input id="metros_maquina" type="number" step="0.01" min="0" required placeholder="Metragem máquina">
+      </div>
+    </div>
+
+    <div class="two-cols">
+      <div>
+        <label for="peso_fornecedor">Peso (Fornecedor) kg <span style="color:var(--danger)">*</span></label>
+        <input id="peso_fornecedor" type="number" step="0.01" min="0" required placeholder="Peso informado">
+      </div>
+    </div>
+
+    <div class="two-cols">
+      <div>
+        <label for="metros_fornecedor">Metros (Fornecedor) <span style="color:var(--danger)">*</span></label>
+        <input id="metros_fornecedor" type="number" step="0.01" min="0" required placeholder="Metragem fornecedor">
+      </div>
+      <div>
+        <label for="status_rolo">Status do Rolo <span style="color:var(--danger)">*</span></label>
+        <select id="status_rolo" required>
+          <option value="">Selecione o status</option>
+          <option value="REPROVADO">REPROVADO</option>
+          <option value="APROVADO">APROVADO</option>
+          <option value="EM ANÁLISE">EM ANÁLISE</option>
+        </select>
+      </div>
+    </div>
+
+    <div style="margin-top:12px" class="ciencia-group">
+      <label style="display:inline-flex;align-items:center;gap:8px;">
+        <input id="declaracao_checkbox" type="checkbox" style="width:18px;height:18px;" required>
+        <span style="font-weight:700;">Declaração de ciência: (revisor) <span style="color:var(--danger)">*</span></span>
+      </label>
+      <div class="helper" style="color:var(--muted);font-size:12px;margin-top:6px">Ao marcar, você confirma que os dados são verdadeiros e que realizou a revisão.</div>
+    </div>
+
+    <label for="observacoes">Observações (opcional)</label>
+    <textarea id="observacoes" rows="2" placeholder="Observações do revisor" style="resize:vertical" oninput="this.value=this.value.toUpperCase()" maxlength="1000"></textarea>
+
+    <div class="progress-wrap" id="progressWrap">
+      <div class="progress-bar" id="progressBar"></div>
+    </div>
+
+    <div class="btn-row" style="margin-top:18px">
+      <button class="btn-primary" id="submitBtn" type="button">
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path fill="#fff" d="M2 21l21-9L2 3v7l15 2-15 2z"/></svg>
+        ▶️ Enviar RRT
+      </button>
+      <button class="btn-ghost" id="btnClearForm" type="button">🧹 Limpar formulário</button>
+      <button class="btn-ghost small" id="btnPreview" type="button">🔎 Visualizar resumo</button>
+    </div>
+
+    <div id="resultArea" style="margin-top:14px"></div>
+
+    <div class="footer" role="contentinfo">
+      <div class="meta">3W Lamfer • Controle de Qualidade</div>
+      <div class="meta"><span class="version">v3.2</span> • © 2025</div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ============================================
+   MÓDULO 1: CONSTANTES E CONFIGURAÇÕES
+   ============================================ */
+const CONFIG = {
+  MAX_FILE_SIZE: 10 * 1024 * 1024, // 10MB em bytes
+  ALLOWED_MIME_TYPES: ['image/jpeg', 'image/png', 'image/jpg'],
+  ALLOWED_EXTENSIONS: ['.jpg', '.jpeg', '.png'],
+  TOAST_DURATION: 3600, // ms
+  PROGRESS_HIDE_DELAY: 600, // ms
+  MAX_DEFECTS: 100, // limite máximo de defeitos
+  MAX_STRING_LENGTH: {
+    FORNECEDOR: 200,
+    OBSERVACOES: 1000,
+    TIPO_DEFEITO: 200
+  }
+};
+
+/* ============================================
+   MÓDULO 2: UTILITÁRIOS DE UI
+   ============================================ */
+const UI = {
+  /**
+   * Exibe mensagem toast ao usuário
+   * @param {string} msg - Mensagem a exibir
+   * @param {string} color - Cor de fundo (padrão: verde)
+   */
+  showToast(msg, color) {
+  const t = document.getElementById('toast');
+    if (!t) {
+      console.warn('Elemento toast não encontrado');
+      return;
+    }
+  t.style.background = color || '#16a34a';
+    t.textContent = String(msg || '');
+  t.classList.add('show');
+  clearTimeout(t._hideT);
+    t._hideT = setTimeout(() => t.classList.remove('show'), CONFIG.TOAST_DURATION);
+  },
+
+  /**
+   * Mostra/oculta loader
+   * @param {boolean} on - true para mostrar, false para ocultar
+   */
+  showLoader(on) {
+    const loader = document.getElementById('loader');
+    if (loader) {
+      loader.style.display = on ? 'flex' : 'none';
+    }
+  },
+
+  /**
+   * Atualiza barra de progresso
+   * @param {number} percent - Percentual (0-100)
+   */
+  setProgress(percent) {
+  const wrap = document.getElementById('progressWrap');
+  const bar = document.getElementById('progressBar');
+    if (!wrap || !bar) return;
+
+    const pct = Math.max(0, Math.min(100, Number(percent) || 0));
+    if (pct === 0) {
+      bar.style.width = '0%';
+      wrap.style.display = 'none';
+    } else if (pct >= 100) {
+      bar.style.width = '100%';
+      setTimeout(() => {
+        wrap.style.display = 'none';
+        bar.style.width = '0%';
+      }, CONFIG.PROGRESS_HIDE_DELAY);
+    } else {
+      wrap.style.display = 'block';
+      bar.style.width = pct + '%';
+    }
+  }
+};
+
+/* ============================================
+   MÓDULO 3: VALIDAÇÃO E SANITIZAÇÃO
+   ============================================ */
+const Validation = {
+  /**
+   * Escapa HTML para prevenir XSS
+   * @param {any} s - String a escapar
+   * @returns {string} String escapada
+   */
+  escapeHtml(s) {
+    if (s === null || s === undefined) return '';
+    const str = String(s);
+    const map = {
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;',
+      "'": '&#039;'
+    };
+    return str.replace(/[&<>"']/g, m => map[m]);
+  },
+
+  /**
+   * Valida tamanho de arquivo
+   * @param {File} file - Arquivo a validar
+   * @returns {Object} {valid: boolean, error?: string}
+   */
+  validateFileSize(file) {
+    if (!file) {
+      return { valid: false, error: 'Nenhum arquivo selecionado' };
+    }
+    if (file.size > CONFIG.MAX_FILE_SIZE) {
+      const sizeMB = (CONFIG.MAX_FILE_SIZE / (1024 * 1024)).toFixed(0);
+      return { valid: false, error: `Arquivo muito grande. Tamanho máximo: ${sizeMB}MB` };
+    }
+    return { valid: true };
+  },
+
+  /**
+   * Valida tipo MIME do arquivo
+   * @param {File} file - Arquivo a validar
+   * @returns {Object} {valid: boolean, error?: string}
+   */
+  validateFileType(file) {
+    if (!file) {
+      return { valid: false, error: 'Nenhum arquivo selecionado' };
+    }
+    const mimeType = file.type.toLowerCase();
+    const extension = '.' + file.name.split('.').pop().toLowerCase();
+
+    if (!CONFIG.ALLOWED_MIME_TYPES.includes(mimeType) && 
+        !CONFIG.ALLOWED_EXTENSIONS.includes(extension)) {
+      return { valid: false, error: 'Tipo de arquivo não permitido. Use JPEG ou PNG' };
+    }
+    return { valid: true };
+  },
+
+  /**
+   * Valida número positivo
+   * @param {any} value - Valor a validar
+   * @param {string} fieldName - Nome do campo para mensagem de erro
+   * @returns {Object} {valid: boolean, value?: number, error?: string}
+   */
+  validatePositiveNumber(value, fieldName = 'Campo') {
+    const num = Number(value);
+    if (isNaN(num) || num < 0) {
+      return { valid: false, error: `${fieldName} deve ser um número positivo` };
+    }
+    return { valid: true, value: num };
+  },
+
+  /**
+   * Valida campo obrigatório
+   * @param {HTMLElement} element - Elemento do formulário
+   * @param {string} fieldName - Nome do campo
+   * @returns {Object} {valid: boolean, error?: string}
+   */
+  validateRequired(element, fieldName) {
+    if (!element) {
+      return { valid: false, error: `Campo ${fieldName} não encontrado` };
+    }
+    const value = String(element.value || '').trim();
+    if (value === '') {
+      return { valid: false, error: `Preencha o campo: ${fieldName}` };
+    }
+    return { valid: true };
+  },
+
+  /**
+   * Valida comprimento máximo de string
+   * @param {string} value - Valor a validar
+   * @param {number} maxLength - Comprimento máximo
+   * @param {string} fieldName - Nome do campo
+   * @returns {Object} {valid: boolean, error?: string}
+   */
+  validateMaxLength(value, maxLength, fieldName) {
+    if (String(value).length > maxLength) {
+      return { valid: false, error: `${fieldName} excede o limite de ${maxLength} caracteres` };
+    }
+    return { valid: true };
+  }
+};
+
+/* ============================================
+   MÓDULO 4: GERENCIAMENTO DE ESTADO
+   ============================================ */
+const State = {
+  defects: [],
+  nextId: 1,
+
+  /**
+   * Adiciona defeito ao estado
+   * @param {Object} defect - Objeto do defeito
+   * @returns {boolean} true se adicionado com sucesso
+   */
+  addDefect(defect) {
+    if (this.defects.length >= CONFIG.MAX_DEFECTS) {
+      UI.showToast(`Limite máximo de ${CONFIG.MAX_DEFECTS} defeitos atingido`, '#ef4444');
+      return false;
+    }
+    this.defects.push({ ...defect, id: this.nextId++ });
+    return true;
+  },
+
+  /**
+   * Remove defeito por índice
+   * @param {number} index - Índice do defeito
+   */
+  removeDefect(index) {
+    if (index >= 0 && index < this.defects.length) {
+      this.defects.splice(index, 1);
+    }
+  },
+
+  /**
+   * Limpa todos os defeitos
+   */
+  clearDefects() {
+    this.defects = [];
+  },
+
+  /**
+   * Atualiza defeito por ID
+   * @param {number} id - ID do defeito
+   * @param {Object} updates - Propriedades a atualizar
+   */
+  updateDefect(id, updates) {
+    const defect = this.defects.find(d => d.id === id);
+    if (defect) {
+      Object.assign(defect, updates);
+    }
+  }
+};
+
+/* ============================================
+   MÓDULO 5: MANIPULAÇÃO DE ARQUIVOS
+   ============================================ */
+const FileHandler = {
+  /**
+   * Converte arquivo para DataURL (Base64)
+   * @param {File} file - Arquivo a converter
+   * @returns {Promise<string>} DataURL do arquivo
+   */
+  fileToDataURL(file) {
+    return new Promise((resolve, reject) => {
+      if (!file) {
+        reject(new Error('Nenhum arquivo fornecido'));
+      return;
+    }
+
+      // Validações de segurança
+      const sizeCheck = Validation.validateFileSize(file);
+      if (!sizeCheck.valid) {
+        reject(new Error(sizeCheck.error));
+        return;
+      }
+
+      const typeCheck = Validation.validateFileType(file);
+      if (!typeCheck.valid) {
+        reject(new Error(typeCheck.error));
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(new Error('Erro ao ler o arquivo'));
+      reader.readAsDataURL(file);
+    });
+  },
+
+  /**
+   * Extrai dados de uma DataURL
+   * @param {string} dataUrl - DataURL completa
+   * @returns {Object|null} {mimeType, base64} ou null se inválido
+   */
+  parseDataURL(dataUrl) {
+    const match = String(dataUrl).match(/^data:(image\/[a-zA-Z]+);base64,(.*)$/);
+    if (!match) return null;
+    return {
+      mimeType: match[1],
+      base64: match[2]
+    };
+  }
+};
+
+/* ============================================
+   MÓDULO 6: COMUNICAÇÃO COM SERVIDOR
+   ============================================ */
+const Server = {
+  /**
+   * Verifica se Google Apps Script está disponível
+   * @returns {boolean}
+   */
+  isAvailable() {
+    return typeof google !== 'undefined' && 
+           google.script && 
+           typeof google.script.run === 'object';
+  },
+
+  /**
+   * Envia foto de defeito para o servidor
+   * @param {Object} payload - {data: string, mimeType: string, defectIndex: number}
+   * @returns {Promise<Object>} Resposta do servidor
+   */
+  uploadDefectPhoto(payload) {
+    return new Promise((resolve, reject) => {
+      if (!this.isAvailable()) {
+        reject(new Error('Google Apps Script não está disponível'));
+        return;
+      }
+
+      try {
+        google.script.run
+          .withSuccessHandler(res => {
+            if (res && res.status === 'SUCESSO') {
+              resolve(res);
+            } else {
+              reject(new Error(res?.message || 'Upload falhou'));
+            }
+          })
+          .withFailureHandler(err => {
+            reject(err || new Error('Erro desconhecido no upload'));
+          })
+          .uploadDefectPhoto(payload);
+      } catch (ex) {
+        reject(ex);
+      }
+    });
+  },
+
+  /**
+   * Processa RRT completo
+   * @param {Object} data - Dados do RRT
+   * @returns {Promise<Object>} Resposta do servidor
+   */
+  processRRT(data) {
+    return new Promise((resolve, reject) => {
+      if (!this.isAvailable()) {
+        reject(new Error('Google Apps Script não está disponível'));
+        return;
+      }
+
+      try {
+        google.script.run
+          .withSuccessHandler(res => {
+            if (res && res.status === 'SUCESSO') {
+              resolve(res);
+            } else {
+              reject(new Error(res?.message || 'Processamento falhou'));
+            }
+          })
+          .withFailureHandler(err => {
+            reject(err || new Error('Erro desconhecido no processamento'));
+          })
+          .processarRRT_Web(data);
+      } catch (ex) {
+        reject(ex);
+      }
+    });
+  }
+};
+
+/* ============================================
+   MÓDULO 7: GERENCIAMENTO DE DEFEITOS
+   ============================================ */
+const DefectManager = {
+  /**
+   * Renderiza lista de defeitos na UI
+   */
+  render() {
+    const defectList = document.getElementById('defect-list');
+    if (!defectList) return;
+
+  defectList.innerHTML = '';
+
+    State.defects.forEach((d, idx) => {
+      const card = document.createElement('div');
+      card.className = 'defect-card';
+
+      // Imagem
+      const img = document.createElement('img');
+      img.className = 'defect-thumb';
+      img.src = d.fotoBase64 || 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iOTYiIGhlaWdodD0iOTYiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PHJlY3Qgd2lkdGg9Ijk2IiBoZWlnaHQ9Ijk2IiBmaWxsPSIjZjVmNWY1Ii8+PHRleHQgeD0iNDgiIHk9IjUwIiBmb250LWZhbWlseT0iQXJpYWwiIGZvbnQtc2l6ZT0iMTIiIGZpbGw9IiM5OTkiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGR5PSIuM2VtIj5TZW0gZm90bzwvdGV4dD48L3N2Zz4=';
+      img.alt = `Foto defeito ${idx + 1}`;
+      img.onerror = function() { this.src = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iOTYiIGhlaWdodD0iOTYiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PHJlY3Qgd2lkdGg9Ijk2IiBoZWlnaHQ9Ijk2IiBmaWxsPSIjZjVmNWY1Ii8+PHRleHQgeD0iNDgiIHk9IjUwIiBmb250LWZhbWlseT0iQXJpYWwiIGZvbnQtc2l6ZT0iMTIiIGZpbGw9IiM5OTkiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGR5PSIuM2VtIj5FcnJvPC90ZXh0Pjwvc3ZnPg=='; };
+
+      // Metadados
+      const meta = document.createElement('div');
+      meta.className = 'defect-meta';
+      const createdDate = new Date(d.criadoEm).toLocaleString('pt-BR');
+      meta.innerHTML = `
+        <strong>(${idx + 1}) ${Validation.escapeHtml(d.tipo)}</strong>
+      <div style="color:var(--muted);font-size:13px;margin-top:6px">
+          ${Validation.escapeHtml(String(d.metroInicial))}m → ${Validation.escapeHtml(String(d.metroFinal))}m
+          <div style="font-size:12px;color:#999;margin-top:6px">Adicionado: ${Validation.escapeHtml(createdDate)}</div>
+          ${d.fotoId ? 
+            `<div style="color:var(--green);font-size:12px;margin-top:6px">✓ Foto enviada (ID: ${Validation.escapeHtml(d.fotoId.substring(0, 8))}...)</div>` : 
+            '<div style="color:#999;font-size:12px;margin-top:6px">⚠ Foto não enviada</div>'
+          }
+        </div>
+      `;
+
+      // Ações
+      const actions = document.createElement('div');
+      actions.className = 'defect-actions';
+
+      // Input oculto para editar foto
+      const editInput = document.createElement('input');
+      editInput.type = 'file';
+      editInput.accept = 'image/jpeg,image/png';
+      editInput.style.display = 'none';
+    editInput.addEventListener('change', async (ev) => {
+        const f = ev.target.files[0];
+        if (!f) return;
+        try {
+          const dataUrl = await FileHandler.fileToDataURL(f);
+          State.updateDefect(d.id, { 
+            fotoBase64: dataUrl, 
+            filename: f.name, 
+            fotoId: '' 
+          });
+          this.render();
+          UI.showToast('Foto atualizada com sucesso');
+        } catch (e) {
+          UI.showToast(e.message || 'Erro ao carregar nova foto', '#ef4444');
+        }
+      });
+
+      // Botão editar foto
+      const editBtn = document.createElement('button');
+      editBtn.className = 'small btn-ghost';
+      editBtn.innerHTML = '<svg class="icon" viewBox="0 0 24 24"><path fill="#111" d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg> Editar foto';
+      editBtn.addEventListener('click', () => editInput.click());
+
+      // Botão enviar foto
+      const uploadBtn = document.createElement('button');
+      uploadBtn.className = 'small btn-primary';
+    uploadBtn.innerHTML = '<svg class="icon" viewBox="0 0 24 24"><path fill="#fff" d="M5 20h14v-2H5v2zM12 3l4 4h-3v6h-2V7H8l4-4z"/></svg> Enviar Foto';
+      uploadBtn.addEventListener('click', () => {
+        this.uploadPhoto(d.id, idx, uploadBtn).catch(e => {
+          UI.showToast('Erro: ' + (e.message || e), '#ef4444');
+        });
+      });
+
+      // Botão remover
+      const removeBtn = document.createElement('button');
+      removeBtn.className = 'small btn-danger';
+      removeBtn.innerHTML = '<svg class="icon" viewBox="0 0 24 24"><path fill="#fff" d="M6 19a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg> Remover';
+      removeBtn.addEventListener('click', () => {
+        if (!confirm(`Remover o defeito "${d.tipo}"?`)) return;
+        State.removeDefect(idx);
+        this.render();
+        UI.showToast('Defeito removido');
+      });
+
+      // Estado do botão de upload
+      if (d.fotoId) {
+        uploadBtn.disabled = true;
+        uploadBtn.innerHTML = '<svg class="icon" viewBox="0 0 24 24"><path fill="#fff" d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg> Enviado ✓';
+      }
+
+    actions.appendChild(editInput);
+    actions.appendChild(editBtn);
+    actions.appendChild(uploadBtn);
+    actions.appendChild(removeBtn);
+      card.appendChild(img);
+      card.appendChild(meta);
+      card.appendChild(actions);
+    defectList.appendChild(card);
+    });
+  },
+
+  /**
+   * Envia foto de um defeito específico
+   * @param {number} defectId - ID do defeito
+   * @param {number} index - Índice do defeito
+   * @param {HTMLElement} btnElement - Elemento do botão
+   * @returns {Promise<Object>}
+   */
+  async uploadPhoto(defectId, index, btnElement) {
+    const defect = State.defects.find(d => d.id === defectId);
+    if (!defect) {
+      throw new Error('Defeito não encontrado');
+    }
+    if (!defect.fotoBase64) {
+      throw new Error('Não há imagem para enviar nesse defeito');
+    }
+
+    // Atualiza UI do botão
+    if (btnElement) {
+      btnElement.disabled = true;
+      btnElement.innerHTML = '<svg class="icon" viewBox="0 0 24 24"><path fill="#fff" d="M12 2v10"/></svg> Enviando...';
+    }
+
+    try {
+      const parsed = FileHandler.parseDataURL(defect.fotoBase64);
+      if (!parsed) {
+        throw new Error('Formato de imagem inválido');
+      }
+
+      const payload = {
+        data: parsed.base64,
+        mimeType: parsed.mimeType,
+        defectIndex: defect.id
+      };
+
+      const res = await Server.uploadDefectPhoto(payload);
+      if (res && res.id) {
+        State.updateDefect(defectId, { fotoId: res.id });
+        this.render();
+        UI.showToast('Foto enviada com sucesso');
+      return res;
+    } else {
+        throw new Error(res?.message || 'Upload retornou falha');
+      }
+    } catch (err) {
+      if (btnElement) {
+        btnElement.disabled = false;
+        btnElement.innerHTML = '<svg class="icon" viewBox="0 0 24 24"><path fill="#fff" d="M5 20h14v-2H5v2zM12 3l4 4h-3v6h-2V7H8l4-4z"/></svg> Enviar Foto';
+      }
+    throw err;
+  }
+  },
+
+  /**
+   * Envia todas as fotos pendentes com barra de progresso
+   * @returns {Promise<Array>}
+   */
+  async uploadAllPhotos() {
+    const toUpload = State.defects.filter(d => d.fotoBase64 && !d.fotoId);
+    if (toUpload.length === 0) {
+      UI.setProgress(100);
+      return Promise.resolve([]);
+    }
+
+  const total = toUpload.length;
+  let completed = 0;
+    UI.setProgress(0);
+
+    const uploadPromises = toUpload.map(async (d) => {
+      const idx = State.defects.findIndex(x => x.id === d.id);
+      try {
+        const btn = null; // Não precisamos do botão aqui
+        await this.uploadPhoto(d.id, idx, btn);
+        completed++;
+        const pct = Math.round((completed / total) * 100);
+        UI.setProgress(pct);
+        return { success: true, defectId: d.id };
+      } catch (e) {
+        completed++;
+        UI.setProgress(Math.round((completed / total) * 100));
+        return { success: false, defectId: d.id, error: e.message };
+      }
+    });
+
+    const results = await Promise.all(uploadPromises);
+    UI.setProgress(100);
+    return results;
+  }
+};
+
+/* ============================================
+   MÓDULO 8: GERENCIAMENTO DE FORMULÁRIO
+   ============================================ */
+const FormManager = {
+  /**
+   * Valida todos os campos obrigatórios
+   * @returns {Object} {valid: boolean, error?: string, field?: string}
+   */
+  validateRequiredFields() {
+    const requiredFields = [
+      { id: 'responsavel', name: 'Responsável pela Revisão' },
+      { id: 'fornecedor', name: 'Fornecedor' },
+      { id: 'nf', name: 'Nº Nota Fiscal' },
+      { id: 'lote', name: 'Lote' },
+      { id: 'numero_peca', name: 'Nº da Peça' },
+      { id: 'referencia', name: 'Referência' },
+      { id: 'cor', name: 'Cor do Tecido' },
+      { id: 'tipo_tecido', name: 'Tipo do Tecido' },
+      { id: 'localizacao', name: 'Localização' },
+      { id: 'largura_cm', name: 'Largura' },
+      { id: 'metros_maquina', name: 'Metros Máquina' },
+      { id: 'peso_fornecedor', name: 'Peso do Rolo' },
+      { id: 'metros_fornecedor', name: 'Metros Fornecedor' },
+      { id: 'status_rolo', name: 'Status do Rolo' }
+    ];
+
+    for (const field of requiredFields) {
+      const element = document.getElementById(field.id);
+      const check = Validation.validateRequired(element, field.name);
+      if (!check.valid) {
+        return { valid: false, error: check.error, field: field.id };
+      }
+    }
+
+    // Valida checkbox de declaração
+    const decl = document.getElementById('declaracao_checkbox');
+    if (!decl || !decl.checked) {
+      return { valid: false, error: 'Você deve marcar a Declaração de ciência', field: 'declaracao_checkbox' };
+    }
+
+    // Valida defeitos (se houver, devem ter foto)
+    for (let i = 0; i < State.defects.length; i++) {
+      const d = State.defects[i];
+      if (!d.fotoId && !d.fotoBase64) {
+        return { 
+          valid: false, 
+          error: `Defeito #${i + 1} ("${d.tipo}") não possui foto. Remova ou adicione uma foto.`,
+          field: 'defects'
+        };
+      }
+    }
+
+    return { valid: true };
+  },
+
+  /**
+   * Coleta dados do formulário
+   * @returns {Object} Dados do formulário
+   */
+  collectFormData() {
+    const getValue = (id) => {
+      const el = document.getElementById(id);
+      return el ? String(el.value || '').trim() : '';
+    };
+
+    const pesoFornecedor = getValue('peso_fornecedor');
+
+    return {
+      responsavel: getValue('responsavel'),
+      fornecedor: getValue('fornecedor'),
+      nf: getValue('nf'),
+      codigo_linx: getValue('codigo_linx'),
+      lote: getValue('lote'),
+      numero_peca: getValue('numero_peca'),
+      referencia: getValue('referencia'),
+      cor: getValue('cor'),
+      tipo_tecido: getValue('tipo_tecido'),
+      localizacao: getValue('localizacao'),
+      largura_cm: getValue('largura_cm'),
+      metros_maquina: getValue('metros_maquina'),
+      peso_fornecedor: pesoFornecedor,
+      peso_fabrica: pesoFornecedor,
+      metros_fornecedor: getValue('metros_fornecedor'),
+      status_rolo: getValue('status_rolo'),
+      declaracao: document.getElementById('declaracao_checkbox')?.checked ? 'CIENTE' : 'NÃO CIENTE',
+      observacoes: getValue('observacoes'),
+      defects: State.defects.map(d => ({
+      id: d.id,
+      tipo: d.tipo,
+      metroInicial: d.metroInicial,
+      metroFinal: d.metroFinal,
+      fotoId: d.fotoId || '',
+      filename: d.filename || '',
+      criadoEm: d.criadoEm
+      }))
+    };
+  },
+
+  /**
+   * Limpa todos os campos do formulário
+   */
+  reset() {
+    const fields = [
+      'responsavel', 'fornecedor', 'nf', 'codigo_linx', 'lote', 'numero_peca',
+      'referencia', 'cor', 'tipo_tecido', 'localizacao', 'largura_cm',
+      'metros_maquina', 'peso_fornecedor', 'metros_fornecedor',
+      'status_rolo', 'observacoes'
+    ];
+
+    fields.forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.value = '';
+    });
+
+    const decl = document.getElementById('declaracao_checkbox');
+    if (decl) decl.checked = false;
+
+    State.clearDefects();
+    State.nextId = 1;
+    UI.setProgress(0);
+    DefectManager.render();
+  },
+
+  /**
+   * Exibe resumo do formulário
+   */
+  showPreview() {
+    const data = this.collectFormData();
+    const summary = {
+      'Responsável': data.responsavel || '—',
+      'Fornecedor': data.fornecedor || '—',
+      'Nº Peça': data.numero_peca || '—',
+      'Localização': data.localizacao || '—',
+      'Status do Rolo': data.status_rolo || '—',
+      'Defeitos': State.defects.length + ' adicionados'
+    };
+
+    let html = '<div style="padding:12px;border-radius:10px;background:#fff;border:1px solid #e6eef9">';
+    for (const k in summary) {
+      html += `<div style="margin-bottom:6px"><strong>${Validation.escapeHtml(k)}:</strong> ${Validation.escapeHtml(String(summary[k]))}</div>`;
+    }
+    html += '</div>';
+
+    const resultArea = document.getElementById('resultArea');
+    if (resultArea) {
+      resultArea.innerHTML = html;
+    }
+    UI.showToast('Resumo gerado (visualização)');
+  }
+};
+
+/* ============================================
+   MÓDULO 9: INICIALIZAÇÃO E EVENTOS
+   ============================================ */
+const App = {
+  /**
+   * Inicializa a aplicação
+   */
+  init() {
+    // Verifica disponibilidade do Google Apps Script
+    if (!Server.isAvailable()) {
+      console.warn('Google Apps Script não está disponível. Algumas funcionalidades podem não funcionar.');
+    }
+
+    // Elementos DOM
+    const inputTipoSelect = document.getElementById('input_tipo_select');
+    const inputTipoText = document.getElementById('input_tipo_text');
+    const inputMi = document.getElementById('input_mi');
+    const inputMf = document.getElementById('input_mf');
+    const inputFile = document.getElementById('input_file');
+    const addDefBtn = document.getElementById('addDefectBtn');
+    const clearDefsBtn = document.getElementById('clearDefectsBtn');
+    const submitBtn = document.getElementById('submitBtn');
+    const clearFormBtn = document.getElementById('btnClearForm');
+    const previewBtn = document.getElementById('btnPreview');
+
+    // Toggle campo "Outro" no tipo de defeito
+    if (inputTipoSelect) {
+      inputTipoSelect.addEventListener('change', () => {
+        if (inputTipoSelect.value === '__OUTRO__') {
+          if (inputTipoText) {
+            inputTipoText.style.display = 'block';
+            inputTipoText.focus();
+          }
+        } else {
+          if (inputTipoText) {
+            inputTipoText.style.display = 'none';
+            inputTipoText.value = '';
+          }
+        }
+      });
+    }
+
+    // Adicionar defeito
+    if (addDefBtn) {
+      addDefBtn.addEventListener('click', async () => {
+        await this.handleAddDefect(inputTipoSelect, inputTipoText, inputMi, inputMf, inputFile);
+      });
+    }
+
+    // Limpar defeitos
+    if (clearDefsBtn) {
+      clearDefsBtn.addEventListener('click', () => {
+        if (State.defects.length === 0) {
+          UI.showToast('Nenhum defeito para limpar', '#f59e0b');
+          return;
+        }
+        if (confirm('Remover todos os defeitos adicionados?')) {
+          State.clearDefects();
+          DefectManager.render();
+          UI.showToast('Lista de defeitos limpa');
+        }
+      });
+    }
+
+    // Enviar formulário
+    if (submitBtn) {
+      submitBtn.addEventListener('click', () => {
+        this.handleSubmit();
+      });
+    }
+
+    // Limpar formulário
+    if (clearFormBtn) {
+      clearFormBtn.addEventListener('click', () => {
+        if (confirm('Limpar todo o formulário?')) {
+          FormManager.reset();
+          UI.showToast('Formulário limpo');
+        }
+      });
+    }
+
+    // Preview
+    if (previewBtn) {
+      previewBtn.addEventListener('click', () => {
+        FormManager.showPreview();
+      });
+    }
+
+    // Aplicar tema escuro se preferido
+    this.applyColorScheme();
+
+    // Render inicial
+    DefectManager.render();
+  },
+
+  /**
+   * Trata adição de defeito
+   */
+  async handleAddDefect(inputTipoSelect, inputTipoText, inputMi, inputMf, inputFile) {
+    // Valida tipo
+    let tipo = inputTipoSelect?.value || '';
+    if (tipo === '__OUTRO__') {
+      tipo = (inputTipoText?.value || '').trim().toUpperCase();
+    }
+    if (!tipo) {
+      UI.showToast('Preencha o tipo do defeito', '#f59e0b');
+      return;
+    }
+
+    // Valida comprimento do tipo
+    const tipoCheck = Validation.validateMaxLength(tipo, CONFIG.MAX_STRING_LENGTH.TIPO_DEFEITO, 'Tipo de defeito');
+    if (!tipoCheck.valid) {
+      UI.showToast(tipoCheck.error, '#ef4444');
+      return;
+    }
+
+    // Valida metros
+    const miVal = inputMi?.value || '';
+    const mfVal = inputMf?.value || '';
+    if (miVal === '' || mfVal === '') {
+      UI.showToast('Metro inicial e final são obrigatórios', '#f59e0b');
+      return;
+    }
+
+    const miCheck = Validation.validatePositiveNumber(miVal, 'Metro inicial');
+    const mfCheck = Validation.validatePositiveNumber(mfVal, 'Metro final');
+    if (!miCheck.valid || !mfCheck.valid) {
+      UI.showToast(miCheck.error || mfCheck.error, '#ef4444');
+      return;
+    }
+
+    let mi = miCheck.value;
+    let mf = mfCheck.value;
+
+    // Inverte se necessário
+    if (mi > mf) {
+      const tmp = mi;
+      mi = mf;
+      mf = tmp;
+      UI.showToast(`Valores invertidos automaticamente: início ${mi}m — fim ${mf}m`, '#f97316');
+    }
+
+    // Processa arquivo se houver
+    let dataUrl = '';
+    let filename = '';
+    const f = inputFile?.files?.[0];
+    if (f) {
+      try {
+        dataUrl = await FileHandler.fileToDataURL(f);
+        filename = f.name;
+      } catch (e) {
+        UI.showToast(e.message || 'Erro ao ler a imagem', '#ef4444');
+        return;
+      }
+    }
+
+    // Adiciona defeito
+    const defect = {
+      tipo: tipo.toUpperCase(),
+      metroInicial: mi,
+      metroFinal: mf,
+      fotoBase64: dataUrl,
+      filename: filename,
+      fotoId: '',
+      criadoEm: new Date().toISOString()
+    };
+
+    if (State.addDefect(defect)) {
+      DefectManager.render();
+      // Limpa inputs
+      if (inputTipoSelect) inputTipoSelect.value = '';
+      if (inputTipoText) {
+        inputTipoText.value = '';
+        inputTipoText.style.display = 'none';
+      }
+      if (inputMi) inputMi.value = '';
+      if (inputMf) inputMf.value = '';
+      if (inputFile) inputFile.value = '';
+      UI.showToast('Defeito adicionado com sucesso');
+    }
+  },
+
+  /**
+   * Trata envio do formulário
+   */
+  async handleSubmit() {
+    const resultArea = document.getElementById('resultArea');
+    if (resultArea) {
+      resultArea.innerHTML = '';
+    }
+
+    // Valida campos obrigatórios
+    const validation = FormManager.validateRequiredFields();
+    if (!validation.valid) {
+      UI.showToast(validation.error, '#ef4444');
+      if (validation.field) {
+        const el = document.getElementById(validation.field);
+        if (el) el.focus();
+      }
+      return;
+    }
+
+    UI.showLoader(true);
+    UI.setProgress(0);
+    UI.showToast('Enviando imagens (se houver)...');
+
+    try {
+      // Envia fotos pendentes
+      await DefectManager.uploadAllPhotos();
+    } catch (err) {
+      UI.showLoader(false);
+      console.error('Erro ao enviar imagens', err);
+      UI.showToast('Erro ao enviar imagens: ' + (err?.message || JSON.stringify(err)), '#ef4444');
+      return;
+    }
+
+    // Coleta dados
+    const mainData = FormManager.collectFormData();
+
+    try {
+      const res = await Server.processRRT(mainData);
+      UI.showLoader(false);
+      UI.setProgress(100);
+
+      if (res && res.id) {
+        UI.showToast('✅ RRT Processado! ID: ' + res.id);
+        setTimeout(() => {
+          FormManager.reset();
+          DefectManager.render();
+          if (resultArea) {
+            resultArea.innerHTML = `<div style="color:var(--green);font-weight:700">RRT processado: ${Validation.escapeHtml(res.id)}</div>`;
+          }
+        }, 600);
+      } else {
+        const msg = res?.message || 'Erro no servidor';
+        UI.showToast(msg, '#ef4444');
+        if (resultArea) {
+          resultArea.innerHTML = `<div style="color:#ef4444;font-weight:700">${Validation.escapeHtml(msg)}</div>`;
+        }
+      }
+    } catch (err) {
+      UI.showLoader(false);
+      console.error('Erro ao processar RRT', err);
+      UI.showToast('Erro no servidor: ' + (err?.message || JSON.stringify(err)), '#ef4444');
+      if (resultArea) {
+        resultArea.innerHTML = `<div style="color:#ef4444;font-weight:700">${Validation.escapeHtml(err?.message || 'Erro desconhecido')}</div>`;
+      }
+    }
+  },
+
+  /**
+   * Aplica tema escuro se preferido pelo usuário
+   */
+  applyColorScheme() {
+    if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+      document.documentElement.style.setProperty('--bg', '#0f1724');
+      document.documentElement.style.setProperty('--card', '#061326');
+      document.documentElement.style.setProperty('--glass-border', 'rgba(255,255,255,0.04)');
+      document.documentElement.style.setProperty('--muted', '#9aa6bf');
+    }
+  }
+};
+
+/* ============================================
+   INICIALIZAÇÃO DA APLICAÇÃO
+   ============================================ */
+// Aguarda DOM estar pronto
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', () => App.init());
+} else {
+  App.init();
+}
+
+</script>
+</body>
+</html>
