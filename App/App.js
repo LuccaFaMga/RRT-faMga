@@ -1,0 +1,2049 @@
+/*******************************************************************
+ * MainApp.gs v2.5 - FULL SYNC COM DatabaseService v9.2
+ *
+ *******************************************************************/
+/* ============================================================
+ *   ⚙️ CONFIG & GLOBAL HELPERS
+ * ============================================================ */
+function getConfigSafe() {
+    const CACHE = CacheService.getScriptCache();
+    const c = CACHE.get("CONFIG_CACHE_V2");
+    if (c) return JSON.parse(c);
+    const cfg = (typeof CONFIG !== "undefined") ? CONFIG : {};
+    CACHE.put("CONFIG_CACHE_V2", JSON.stringify(cfg), 600);
+    return cfg;
+}
+
+function include(filename) {
+    return HtmlService.createHtmlOutputFromFile(filename).getContent();
+}
+
+function _hmac(data) {
+    const key = getConfigSafe().SECRET_KEY || "DEFAULT_RRT_KEY";
+    const signature = Utilities.computeHmacSha256Signature(data, key);
+    return Utilities.base64EncodeWebSafe(signature);
+}
+
+function buildSupervisorApprovalLink(idRolo, decision, expiresMinutes) {
+    const base = ScriptApp.getService().getUrl();
+    const exp = Date.now() + (expiresMinutes || 15) * 60000;
+    const payload = JSON.stringify({ id: idRolo, decision, exp });
+    const signature = _hmac(payload);
+    return `${base}?page=supervisor&action=decide&data=${encodeURIComponent(payload)}&sig=${encodeURIComponent(signature)}`;
+}
+
+function normalizeKeysToSnakeCase(obj) {
+    if (!obj || typeof obj !== "object" || Array.isArray(obj)) return obj;
+    return Object.fromEntries(
+        Object.entries(obj).map(([k, v]) => [
+            k.replace(/([A-Z])/g, "_$1").toLowerCase(),
+            v
+        ])
+    );
+}
+
+function sanitizeFilename(name) {
+    return String(name || "").replace(/[^\w.\-]+/g, "_").substring(0, 80);
+}
+
+function ensureNumber(value) {
+    if (value === null || value === undefined || value === "") return 0;
+    const num = Number(String(value).replace(',', '.'));
+    return isNaN(num) ? 0 : num;
+}
+
+// Helper de logs de fluxo (isolado, pequeno)
+function logFlowMain(id, etapa, obj) {
+    try {
+        const idPart = id ? String(id) : '->';
+        Logger.log("[FLOW][MAIN] " + idPart + " | " + String(etapa) + " | " + JSON.stringify(obj));
+    } catch (e) {
+        Logger.log("[FLOW][MAIN] -> | LOG_ERROR | " + e.message);
+    }
+}
+
+/* ============================================================
+ *   🧭 WEB APP ROUTER: doGet(e) — COM LOGS DETALHADOS (FIXED)
+ * ============================================================ */
+function doGet(e) {
+    const traceId = Utilities.getUuid().slice(0, 8); // ID curto p/ rastrear requisição
+    Logger.log(`[DOGET][${traceId}] START`);
+
+    try {
+        Logger.log(`[DOGET][${traceId}] RAW EVENT: ${JSON.stringify(e)}`);
+
+        const p = e && e.parameter ? e.parameter : {};
+        Logger.log(`[DOGET][${traceId}] PARAMS: ${JSON.stringify(p)}`);
+
+        const page = p.page || "index";
+        Logger.log(`[DOGET][${traceId}] PAGE RESOLVED: "${page}"`);
+
+        const appUrl = ScriptApp.getService().getUrl(); // 🔑 FUNDAMENTAL
+
+        let template;
+
+        switch (page) {
+
+            case "index":
+                Logger.log(`[DOGET][${traceId}] ROUTE → index`);
+                template = HtmlService.createTemplateFromFile("ui/index");
+                break;
+
+            case "supervisor":
+                Logger.log(`[DOGET][${traceId}] ROUTE → supervisor`);
+                template = handleSupervisorPage(p);
+                break;
+
+            case "estoque":
+                Logger.log(`[DOGET][${traceId}] ROUTE → estoque`);
+                template = handleEstoquePage(p);
+                break;
+
+            case "compras":
+                Logger.log(`[DOGET][${traceId}] ROUTE → compras`);
+                template = handleComprasPage(p);
+                break;
+
+            case "export":
+                Logger.log(`[DOGET][${traceId}] ROUTE → export`);
+                return handlePowerBIExport(p);
+
+            case "reviewer":
+                Logger.log(`[DOGET][${traceId}] ROUTE → reviewer`);
+                template = handleReviewerPage(p);
+                break;
+
+            default:
+                Logger.log(`[DOGET][${traceId}] ROUTE → default (reviewer)`);
+                template = handleReviewerPage(p);
+        }
+
+        if (!template) {
+            throw new Error(`Template não definido para page="${page}"`);
+        }
+
+        // Se o retorno já é um HtmlOutput (não precisa de evaluate), retorna direto
+        if (template.getContent) {
+            Logger.log(`[DOGET][${traceId}] HtmlOutput detectado → retorno direto`);
+            return template.setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+        }
+
+        // 🔑 INJEÇÃO OBRIGATÓRIA DA URL BASE (apenas para templates)
+        template.APP_URL = appUrl;
+
+        Logger.log(`[DOGET][${traceId}] TEMPLATE OK → evaluate()`);
+
+        const output = template.evaluate()
+            .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL)
+            .setTitle(`RRT - ${page.charAt(0).toUpperCase() + page.slice(1)}`);
+
+        Logger.log(`[DOGET][${traceId}] END OK`);
+        return output;
+
+    } catch (err) {
+        Logger.log(`[DOGET][${traceId}] ❌ ERROR: ${err.message}`);
+        Logger.log(err.stack);
+
+        return HtmlService.createHtmlOutput(`
+            <h3>Erro crítico no carregamento</h3>
+            <p><strong>${err.message}</strong></p>
+            <pre style="white-space:pre-wrap">${err.stack || ""}</pre>
+        `);
+    }
+}
+
+/* ============================================================
+ *   ⚡️ HTTP POST HANDLER: doPost(e)
+ * ============================================================ */
+function doPost(e) {
+    let response;
+
+    try {
+        const payload = JSON.parse(e.postData.contents);
+        const action = payload.action || "processar_revisao";
+
+        try { logFlowMain(payload.id_do_rolo || payload.id || '-', 'DOPOST_START', { action: action, payload: payload }); } catch (e) { }
+
+        switch (action) {
+            case "processar_revisao": response = processarRRT_Web(payload); break;
+            case "supervisor_update": response = handleSupervisorUpdate(payload); break;
+            case "supervisor_decision": response = handleSupervisorDecision(payload); break;
+            
+            // Ações dos Controllers existentes
+            case "handleWithdrawal": response = handleWithdrawal(payload); break;
+            case "getRollsByStatus": response = getRollsByStatus_Web(payload); break;
+            case "processSupervisorDecision": response = processSupervisorDecision_Web(payload); break;
+            case "generateRevisionPDF": response = generateRevisionPDF_Web(payload.idRolo); break;
+            case "processarDecisaoCompras": response = processarDecisaoCompras_Web(payload); break;
+            
+            // Ações de Unidades
+            case "getUnidades": response = getUnidades_Web(); break;
+            case "addUnidade": response = addUnidade_Web(payload); break;
+            case "movimentarUnidade": response = movimentarUnidade_Web(payload); break;
+
+            case "stock_create":
+            case "stock_update":
+            case "stock_delete":
+                response = handleStockAction(payload); break;
+
+            case "initialize_roll":
+                response = initializeRollAndGetId(payload.revisorNome, payload.qrData || null); break;
+
+            case "upload_photo":
+                response = uploadDefectPhoto(payload); break;
+
+            default:
+                throw new Error(`Ação desconhecida: ${action}`);
+        }
+    } catch (err) {
+        response = { status: "FALHA", message: err.message };
+    }
+
+    return ContentService
+        .createTextOutput(JSON.stringify(response))
+        .setMimeType(ContentService.MimeType.JSON);
+}
+
+/* ============================================================
+ *   PAGE HANDLERS (doGet) — Versão Corrigida
+ * ============================================================ */
+function handleSupervisorPage(params) {
+    const template = HtmlService.createTemplateFromFile("supervisor");
+
+    template.error = null;
+    template.idRolo = "";
+    template.prefillDecision = "";
+    template.rollData = null; 
+    template.SUPERVISOR_NOME = params.user || Session.getActiveUser().getEmail(); 
+
+    if (params.action === "decide") {
+        try {
+            const decoded = JSON.parse(decodeURIComponent(params.data));
+            const expected = _hmac(JSON.stringify(decoded));
+            if (expected !== params.sig) throw new Error("Assinatura inválida.");
+            if (Date.now() > decoded.exp) throw new Error("Link expirado.");
+            const roll = DatabaseService.rolls.get(decoded.id);
+            template.idRolo = decoded.id; 
+            template.prefillDecision = decoded.decision;
+            template.rollData = roll;
+        } catch (err) {
+            template.error = err.message;
+        }
+    } else if (params.id) {
+        template.idRolo = params.id;
+        template.rollData = DatabaseService.rolls.get(params.id);
+    }
+
+    if (template.rollData) {
+        template.statusSupervisor = template.rollData.status_supervisor?.toString().trim().toUpperCase() || '';
+        template.statusDoRolo     = template.rollData.fase_atual || template.rollData.status_do_rolo || '';
+    } else {
+        template.statusSupervisor = '';
+        template.statusDoRolo = '';
+    }
+
+    return template;
+}
+
+function handleEstoquePage(params) {
+    // Como estoque.html não usa variáveis do servidor (<?= ?>), 
+    // usamos createHtmlOutputFromFile para evitar processamento de template
+    const output = HtmlService.createHtmlOutputFromFile("ui/estoque");
+    output.setTitle("FA-RRT | Controle de Estoque");
+    return output;
+}
+
+function handleReviewerPage(params) {
+    const template = HtmlService.createTemplateFromFile("ui/reviewer");
+    template.idRolo = params.idRolo || "";
+    return template;
+}
+
+function handleComprasPage(params) {
+    if (!params.id) throw new Error("ID obrigatório.");
+    const roll = DatabaseService.rolls.get(params.id);
+    if (!roll) throw new Error(`Rolo ${params.id} não encontrado ou acesso negado.`);
+    const template = HtmlService.createTemplateFromFile("compras");
+    template.idRolo = params.id;
+    template.COMPRADOR_NOME = Session.getActiveUser().getEmail();
+    template.roll = roll;
+    template.statusSupervisor = roll.status_supervisor || '';
+    template.defeitosEncontrados = roll.defeitos?.length || 0;
+    template.localizador = roll.localizacao || '';
+    return template;
+}
+
+/* ============================================================
+ *   SUPERVISOR ACTIONS
+ * ============================================================ */
+function handleSupervisorUpdate(payload) {
+    const { id, updates, user } = payload;
+    for (const [key, value] of Object.entries(updates)) {
+        switch (key) {
+            case "fase_atual":
+                try { logFlowMain(id, 'WORKFLOW_TRANSITION_BEFORE', { to: value, user: user }); } catch (e) { }
+                WorkflowService.transition(id, value, { usuario: user });
+                try { logFlowMain(id, 'WORKFLOW_TRANSITION_AFTER', { to: value }); } catch (e) { }
+                break;
+            case "localizacao_atual": DatabaseService.rolls.updateLocation(id, value); break;
+            case "notas_fiscais": DatabaseService.rolls.updateFiscalNotes(id, value); break;
+            case "fotos": DatabaseService.rolls.addPhotos(id, value); break;
+            default: DatabaseService.rolls.update(id, { [key]: value }); break;
+        }
+    }
+    return { status: "SUCESSO", message: `Rolo ${id} atualizado.` };
+}
+
+function handleSupervisorDecision(payload) {
+    const { id, decision, user, observacoes } = payload;
+    try { logFlowMain(id, 'SUPERVISOR_DECISION_START', payload); } catch (e) { }
+    const next = decision === "APROVADO" ? "aprovado_supervisor" : "reprovado_supervisor";
+    try { logFlowMain(id, 'WORKFLOW_TRANSITION_BEFORE', { to: next }); } catch (e) { }
+    const wf = WorkflowService.transition(id, next, { usuario: user, notas: observacoes || "" });
+    try { logFlowMain(id, 'WORKFLOW_TRANSITION_AFTER', wf); } catch (e) { }
+    return { status: "SUCESSO", id, fase_atual: wf.para };
+}
+
+/* ============================================================
+ *   STOCK ACTIONS
+ * ============================================================ */
+function handleStockAction(payload) {
+    const { action, id, data } = payload;
+  if (action === "stock_update") {
+    if (data && (data.fase_atual || data.FASE_ATUAL)) {
+      const nextPhase = data.fase_atual || data.FASE_ATUAL;
+      WorkflowService.transition(id, nextPhase, {
+        usuario: Session.getActiveUser().getEmail()
+      });
+      delete data.fase_atual;
+      delete data.FASE_ATUAL;
+    }
+    return DatabaseService.rolls.update(id, data);
+  }
+    if (action === "stock_delete") return DatabaseService.rolls.delete(id);
+    throw new Error(`Ação desconhecida: ${action}`);
+}
+
+/* ============================================================
+ *   📸 UPLOAD DE FOTOS
+ * ============================================================ */
+function uploadDefectPhoto(payload) {
+    try {
+        const p = normalizeKeysToSnakeCase(payload);
+        const id = p.id_rolo;
+        let base64 = p.foto_base64 || p.data_url;
+        if (!id || !base64) throw new Error("ID do rolo e foto são obrigatórios.");
+        let mime = "image/jpeg";
+        if (String(base64).startsWith("data:")) {
+            const match = base64.match(/^data:(image\/[^;]+);base64,(.*)$/);
+            if (!match) throw new Error("Formato de imagem inválido.");
+            mime = match[1];
+            base64 = match[2];
+        }
+        const ext = mime.includes("png") ? ".png" : ".jpg";
+        const filename = sanitizeFilename(`${p.nome_defeito || "defeito"}_${Date.now()}${ext}`);
+        const bytes = Utilities.base64Decode(base64);
+        const blob = Utilities.newBlob(bytes, mime, filename);
+        const folder = getOrCreateRollFolder(id).fotos;
+        const file = folder.createFile(blob);
+        file.setSharing(DriveApp.Access.ANYONE, DriveApp.Permission.VIEW);
+        return { status: "SUCESSO", file_id: file.getId(), file_url: file.getDownloadUrl(), filename: file.getName() };
+    } catch (err) {
+        Logger.log(`[UPLOAD FOTO] ${err.message}`);
+        return { status: "FALHA", message: err.message };
+    }
+}
+
+/* ============================================================
+ * 🧮 PROCESSAMENTO DO REVISOR — WORKFLOW v7 (DESACOPLADO)
+ * ============================================================ */
+function processarRRT_Web(rawMainData) {
+  const idRolo = String(rawMainData?.id_do_rolo || "").trim();
+  if (!idRolo) throw new Error("ID do rolo ausente.");
+
+  try {
+    logFlowMain?.(idRolo, "PROCESSAR_START", rawMainData);
+
+    const ts = Utilities.formatDate(new Date(), "GMT-3", "yyyy-MM-dd HH:mm:ss");
+    const previous = DatabaseService.rolls.get(idRolo) || {};
+
+    const mainData = normalizeMainData(rawMainData, previous, ts);
+    const scoreInfo = calculateScoreAndDecision(mainData);
+    const revisionId = resolveRevisionId(idRolo, mainData);
+
+    // Monta registros
+    const roloRecord = buildRoloRecord(idRolo, revisionId, mainData, scoreInfo, ts);
+    const defects = buildDefectsRecords(mainData, revisionId, ts);
+    const photos = buildPhotosRecords(mainData, defects, revisionId, ts);
+
+    const structuredPayload = buildStructuredPayload(roloRecord, defects, photos);
+    const insertResult = persistStructuredData(structuredPayload);
+
+    // ================================
+    // ✅ WORKFLOW OFICIAL
+    // ================================
+    // status_rolo do form: aprovado_revisor | em_analise
+    // workflow aceita: aprovado_revisor | aguardando_supervisor (em_analise -> aguardando_supervisor)
+    const statusForm = String(mainData.status_rolo || "").trim().toLowerCase();
+    let nextPhase = scoreInfo?.nextPhase ? String(scoreInfo.nextPhase).trim().toLowerCase() : "";
+
+    // fallback por status do form
+    if (!nextPhase) {
+      nextPhase = (statusForm === "aprovado_revisor") ? "aprovado_revisor" : "aguardando_supervisor";
+    }
+
+    // Se veio "em_analise", mapeia para o termo oficial do workflow
+    if (nextPhase === "em_analise") nextPhase = "aguardando_supervisor";
+
+    const usuario = mainData.revisor_nome || mainData.revisor || "sistema";
+    const notas = mainData.observacoes || null;
+
+    if (!previous.fase_atual) {
+      try {
+        WorkflowService.transition(idRolo, "em_revisao", {
+          usuario,
+          notas: "Inicio da revisao"
+        });
+      } catch (initErr) {
+        Logger.log(`[WORKFLOW] ⚠️ Falha ao iniciar em_revisao (${idRolo}): ${initErr.message}`);
+      }
+    }
+
+    // Executa a transição (preenche FASE_ATUAL, HISTORICO_STATUS, TIMESTAMPS)
+    let wfResult = null;
+    try {
+      wfResult = WorkflowService.transition(idRolo, nextPhase, {
+        usuario,
+        motivo: scoreInfo?.motivo || null,
+        notas
+      });
+    } catch (wfErr) {
+      // Se a transição falhar, grava erro na linha mas mantém a persistência dos dados técnicos
+      Logger.log(`[WORKFLOW] ❌ Falha na transição (${idRolo}): ${wfErr.message}`);
+      try {
+        DatabaseService.rolls.update(idRolo, { erro_workflow: wfErr.message });
+      } catch (_) {}
+    }
+
+    return {
+      status: "SUCESSO",
+      id: idRolo,
+      revision_id: revisionId,
+      next_phase_aplicada: wfResult?.para || null,
+      next_phase_suggestion: scoreInfo?.nextPhase || null,
+      inserted_count: insertResult.inserted_rows
+    };
+
+  } catch (e) {
+    Logger.log("[PROCESSAR RRT] ❌ ERRO: " + e.message);
+    try {
+      WorkflowService.transition(idRolo, "erro_processamento", { force: true, usuario: "sistema", motivo: e.message });
+    } catch (_) {}
+    return { status: "FALHA", message: e.message };
+  }
+}
+
+function normalizeMainData(raw, previous, ts) {
+  const data = normalizeKeysToSnakeCase(raw);
+
+  // wid -> metros fornecedor; len -> largura (pode vir em m)
+  mapMetersAndWidth(data);
+
+  // ✅ metros revisado: usa valor real informado; fallback para metros_fornecedor
+  // IMPORTANTE: se revised_meters ou metros_revisado vem com valor 0, precisa usar fallback
+  let mr = Number(data.revised_meters || data.metros_revisado || 0);
+  
+  // Se vieram zerados, tenta fallback
+  if (!mr || mr === 0) {
+    mr = Number(data.metros_fornecedor || data.wid || 0);
+  }
+
+  data.metros_revisado = mr;
+  data.revised_meters = mr;
+
+  // ✅ timestamps (mantém criado_em se já existir)
+  data.timestamps = {
+    criado_em: previous.timestamps?.criado_em || ts,
+    atualizado_em: ts,
+    fase_entrada: previous.timestamps?.fase_entrada || ts
+  };
+
+  // ✅ arrays
+  data.defeitos = Array.isArray(data.defeitos)
+    ? data.defeitos
+    : Array.isArray(data.defects) ? data.defects : [];
+
+  data.fotos = Array.isArray(data.fotos)
+    ? data.fotos
+    : Array.isArray(data.photos) ? data.photos : [];
+
+  return data;
+}
+
+
+function mapMetersAndWidth(data) {
+  // wid → metros fornecedor
+  data.metros_fornecedor = Number(
+    data.wid || data.meters_supplier || data.metros_fornecedor || 0
+  );
+
+  // len → largura (se vier em metros, converte para cm)
+  let w = Number(data.len || data.width || data.largura_cm || 0);
+
+  // Heurística simples: se for < 10, provavelmente está em METROS (ex.: 1.55)
+  if (w > 0 && w < 10) w = w * 100;
+
+  data.largura_cm = w;
+}
+
+
+function calculateScoreAndDecision(mainData) {
+  const score = RRTServices.RRT.calcularPontuacao(mainData);
+
+  const decisao = String(
+    mainData.decisao_revisor || mainData.status_rolo || ""
+  ).toLowerCase();
+
+  let nextPhase;
+  let motivo;
+
+  if (decisao === "aprovado" || decisao === "aprovado_revisor") {
+    if (score.pontosPor100m2 < 35) {
+      nextPhase = "em_estoque";
+      motivo = "Aprovação automática — pontuação < 35";
+    } else {
+      nextPhase = "aguardando_supervisor";
+      motivo = "Pontuação ≥ 35";
+    }
+  } else {
+    nextPhase = "aguardando_supervisor";
+    motivo = "Decisão do revisor";
+  }
+
+  return {
+    pontosPor100m2: score.pontosPor100m2,
+    statusQualidadePontos: score.statusQualidadePontos,
+    nextPhase,
+    motivo
+  };
+}
+
+function resolveRevisionId(idRolo, mainData) {
+  // Prioridade 1: Se já tem revision_id, usa
+  if (mainData.revision_id) return mainData.revision_id;
+  
+  try {
+    // Prioridade 2: Usar novo schema (DatabaseService v9.2)
+    // Passa OBJETO com supplier_id e product_id para gerar [S]-[P]-[T]
+    const revisionPayload = {
+      supplier_id: mainData.supplier_id || mainData.fornecedor_id || String(idRolo).substring(0, 6),
+      product_id: mainData.product_id || mainData.produto_id || idRolo
+    };
+    
+    // Verifica se DatabaseService tem método novo
+    if (DatabaseService?.generateShortRevisionId) {
+      return DatabaseService.generateShortRevisionId(revisionPayload);
+    } else {
+      // Fallback: Se função não existir, gera manualmente
+      return revisionPayload.supplier_id + "-" + revisionPayload.product_id + "-" + Date.now().toString().slice(-5);
+    }
+  } catch (e) {
+    Logger.log("[resolveRevisionId] ⚠️ Erro ao gerar: " + e.message);
+    // Fallback final
+    return idRolo + "-" + Date.now().toString().slice(-6);
+  }
+}
+
+
+function buildRoloRecord(idRolo, revisionId, data, score, ts) {
+  return {
+    roll_id: idRolo,
+    review_id: revisionId,
+    revisor: data.revisor_nome || data.revisor || "",
+    fornecedor: data.supplier_nm || data.fornecedor || "",
+    nf: data.nf || data.nota_fiscal || "",
+    metros_fornecedor: data.metros_fornecedor,
+    metros_revisado: data.metros_revisado,
+    largura_cm: data.largura_cm,
+    data_revisao: ts,
+    status_final: data.status_rolo || "aprovado_revisor",
+    parecer_final: data.observacoes || "",
+    pontos: score.pontosPor100m2,
+    next_phase_suggestion: score.nextPhase
+  };
+}
+
+
+function buildDefectsRecords(data, revisionId, ts) {
+  return (data.defeitos || []).map(d => ({
+    revision_id: revisionId,
+    tipo: d.tipo || d.tipo_defeito || "Desconhecido",
+    metro_inicial: Number(d.metro_inicial || 0),
+    metro_final: Number(d.metro_final || 0),
+    gravidade: d.gravidade || "",
+    zona: Array.isArray(d.posicao_largura)
+      ? d.posicao_largura.join(',')
+      : d.zona || "",
+    observacoes: d.observacoes || "",
+    criado_em: ts
+  }));
+}
+
+
+function buildPhotosRecords(data, defects, revisionId, ts) {
+  const photos = [];
+
+  (data.fotos || []).forEach(p => {
+    const url = p.url || p.url_foto || p.file_url;
+    if (url) photos.push({
+      revision_id: revisionId,
+      url,
+      tipo_foto: p.tipo_foto || "Geral",
+      uploaded_at: ts
+    });
+  });
+
+  defects.forEach(d => {
+    if (d.foto_url) {
+      photos.push({
+        revision_id: revisionId,
+        url: d.foto_url,
+        tipo_foto: "Defeito",
+        uploaded_at: ts
+      });
+    }
+  });
+
+  return photos;
+}
+
+
+function buildStructuredPayload(rolo, defeitos, fotos) {
+  // ✅ CRÍTICO: Mapear TODOS os campos obrigatórios para novo schema
+  return {
+    rolo: {
+      // IDs (CRÍTICO)
+      roll_id: rolo.roll_id || rolo.id_do_rolo || "",
+      review_id: rolo.review_id || rolo.revision_id || "",
+      
+      // QR Fields (supplier, produto, NF)
+      supplier_id: rolo.supplier_id || rolo.fornecedor_id || "",
+      supplier_nm: rolo.supplier_nm || rolo.fornecedor || rolo.supplier_name || "",
+      nf: rolo.nf || rolo.nota_fiscal || "",
+      product_id: rolo.product_id || rolo.produto_id || rolo.roll_id || "",
+      lot: rolo.lot || rolo.lote || "",
+      sup_product_id: rolo.sup_product_id || rolo.produto_sup_id || "",
+      color_id: rolo.color_id || rolo.cor || "",
+      fabric_pattern: rolo.fabric_pattern || rolo.padronagem || "",
+      loc: rolo.loc || rolo.localizacao || "",
+      
+      // Dimensões
+      len: rolo.len || rolo.largura_cm || 0,
+      wid: rolo.wid || rolo.metros_fornecedor || 0,
+      
+      // Composição
+      comp: rolo.comp || rolo.composicao || "",
+      
+      // Revisor (CRÍTICO)
+      revisor_nome: rolo.revisor || rolo.revisor_nome || "",
+      
+      // Tipo de tecido e metragem (NOVO SCHEMA)
+      tipo_tecido: rolo.tipo_tecido || "PLANO",
+      metros_revisado: ensureNumber(rolo.metros_revisado || rolo.revised_meters || 0),
+      peso_kg: ensureNumber(rolo.peso_kg || 0),
+      
+      // Pontos e tempo
+      total_pontos: ensureNumber(rolo.pontos || rolo.total_pontos || 0),
+      tempo_total_seg: ensureNumber(rolo.tempo_total_seg || 0),
+      
+      // Status
+      status: rolo.status_final || rolo.status_rolo || "aprovado_revisor"
+    },
+    defeitos: Array.isArray(defeitos) ? defeitos : [],
+    fotos: Array.isArray(fotos) ? fotos : []
+  };
+}
+
+function persistStructuredData(payload) {
+  if (!DatabaseService?.insertStructuredData) {
+    throw new Error("DatabaseService.insertStructuredData indisponível");
+  }
+  return DatabaseService.insertStructuredData(payload);
+}
+
+/**
+ * Client-accessible wrapper to request a workflow transition for a given roll.
+ * Payload expected: { id: <rollId>, next: <next_phase>, options: { usuario, notas, ... } }
+ * 🆕 ALTERADO: Agora valida estado atual antes de transicionar para evitar conflitos.
+ */
+function transitionRoll(payload) {
+    try {
+        const id = payload && (payload.id || payload.rollId || payload.roll_id);
+        const next = payload && (payload.next || payload.next_phase || payload.nextPhase || 'aprovado_revisor');
+        const options = payload && (payload.options || {});
+        
+        const current = DatabaseService.rolls.get(id);
+        if (!current) throw new Error(`Rolo ${id} não encontrado`);
+        
+        const currentPhase = (current.fase_atual || 'criado').toLowerCase();
+        Logger.log(`[transitionRoll] Solicitação: ${currentPhase} → ${next}`);
+        
+        const result = WorkflowService.transition(id, next, options);
+        return { status: 'SUCESSO', data: result };
+    } catch (err) {
+        return { status: 'FALHA', message: err && err.message };
+    }
+}
+
+function normalizeQrPayload(qr) {
+  if (!qr || typeof qr !== 'object') return {};
+
+  return {
+    supplier_id: qr.supplier_id || null,
+    supplier_nm: qr.supplier_name || qr.supplier_nm || null,
+
+    nf: qr.nf || null,
+    product_id: qr.product_id || null,
+    lot: qr.lot || null,
+    sup_product_id: qr.sup_product_id || null,
+
+    color_id: qr.color_id || null,
+    fabric_pattern: qr.fabric_pattern || null,
+    loc: qr.loc || null,
+
+    // 📏 metros / largura — padrão interno
+    wid:
+      qr.meters_supplier ??
+      qr.wid ??
+      null,
+
+    len:
+      qr.len ??
+      null,
+
+    comp: qr.comp || null,
+    
+    // 🧵 estrutura do tecido — importante para diferenciar malha vs plano
+    est_tc: qr.est_tc || null
+  };
+}
+
+/* ============================================================
+ * 🆕 CREATE ROLL (VERSÃO FINAL / ALINHADA AO FRONTEND) — FIX
+ * ============================================================ */
+function initializeRollAndGetId(revisorNome, qrData = null) {
+  try {
+    // 🔄 Compatibilidade com payload objeto
+    if (revisorNome && typeof revisorNome === "object" && qrData === null) {
+      const payload = revisorNome;
+      revisorNome = payload.revisorNome || payload.revisor || payload.revisor_nome || "";
+      qrData = payload.qrData || payload.qr_data || null;
+    }
+
+    // 🚨 VALIDAÇÃO CRÍTICA DE RESPONSÁVEL
+    if (!revisorNome || String(revisorNome).trim() === "" || revisorNome === "Selecionar") {
+      throw new Error("Revisor inválido para iniciar a revisão");
+    }
+
+    const ts = new Date().toISOString();
+
+    let parsedQr = null;
+    if (typeof qrData === "string") {
+      parsedQr = normalizeQrPayload(parseQrCodeData(qrData));
+    } else if (qrData && typeof qrData === "object") {
+      parsedQr = normalizeQrPayload(qrData);
+    }
+
+    // 🔹 ID DO ROLO FÍSICO (só existe se veio de QR)
+    const productId = String(parsedQr?.product_id || parsedQr?.produto_id || "").trim() || null;
+
+    // 🔹 ID DA REVISÃO (sessão de trabalho)
+    const revisionId = DatabaseService.generateShortRevisionId(parsedQr);
+
+    Logger.log("[SERVER] Nova revisão criada: " + revisionId +
+               " | Rolo físico: " + (productId || "N/A") +
+               " | Revisor: " + revisorNome);
+
+    return {
+      status: "SUCESSO",
+      review_id: revisionId,
+      roll_id: productId,   // null no modo manual = CORRETO
+      started_at: ts,
+      elapsed_seconds: 0
+    };
+
+  } catch (e) {
+    Logger.log("[SERVER] ❌ Erro initializeRollAndGetId: " + e.message);
+    return { status: "FALHA", message: e.message };
+  }
+}
+
+
+/* ============================================================
+ * 🔍 CHECK ACTIVE ROLL (VERSÃO FINAL / TIMER-SAFE)
+ * ============================================================ */
+function checkActiveRoll(responsavel) {
+  try {
+    Logger.log('[SERVER] Verificando rolo ativo para: ' + responsavel);
+
+    // ✅ CORRIGIDO: Usar 'INSPECOES' ao invés de 'rolos'
+    const rows = DatabaseService.databaseQuery({
+      collection: 'INSPECOES',
+      where: [
+        { field: 'REVISOR', op: '==', value: responsavel },
+        { field: 'STATUS_FINAL', op: '==', value: 'EM_REVISAO' }
+      ]
+    });
+
+    if (rows && rows.length > 0) {
+      const active = rows[0];
+
+      const startedAt = active.started_at || active.DATA_REGISTRO
+        ? new Date(active.started_at || active.DATA_REGISTRO)
+        : null;
+
+      let elapsedSeconds = 0;
+      if (startedAt && !isNaN(startedAt)) {
+        elapsedSeconds = Math.floor(
+          (Date.now() - startedAt.getTime()) / 1000
+        );
+      }
+
+      Logger.log(
+        '[SERVER] Rolo ativo encontrado: ' +
+          (active.REVISION_ID || active.ID_ROLO) +
+          ' | elapsed=' +
+          elapsedSeconds +
+          's'
+      );
+
+      return {
+        has_active_roll: true,
+        roll_id: active.roll_id || active.ID_ROLO,
+        review_id: active.review_id || active.REVISION_ID,
+        roll_phase: active.STATUS_FINAL,
+
+        // ⏱️ TIMER
+        started_at: active.started_at || active.DATA_REGISTRO || null,
+        elapsed_seconds: elapsedSeconds,
+
+        // Dados completos para repopular formulário
+        data: active
+      };
+    }
+
+    Logger.log('[SERVER] Nenhum rolo ativo para este revisor');
+    return { has_active_roll: false };
+  } catch (e) {
+    Logger.log('[SERVER] ERRO checkActiveRoll: ' + e.message);
+
+    if (
+      e.message &&
+      (e.message.includes('intervalo') ||
+        e.message.includes('getLastRow'))
+    ) {
+      Logger.log(
+        '[SERVER] ⚠️ Planilha vazia detectada. Retornando seguro.'
+      );
+      return { has_active_roll: false, error: 'empty_sheet' };
+    }
+
+    return { has_active_roll: false, error: e.message };
+  }
+}
+
+function parseQrCodeData(qrRaw) {
+  if (!qrRaw || typeof qrRaw !== 'string') {
+    throw new Error("Nenhum conteúdo fornecido");
+  }
+
+  const p = qrRaw.split(';').map(v => v.trim());
+
+  if (p.length < 12) {
+    throw new Error("QR inválido: quantidade de campos incorreta");
+  }
+
+  return {
+    supplier_id: p[0],
+    supplier_nm: p[1],
+    nf: p[2],
+    product_id: p[3],
+    lot: p[4],
+    sup_product_id: p[5],
+    color_id: p[6],
+    fabric_pattern: p[7],
+    loc: p[8],
+    wid: Number(p[10].replace(',', '.')),  // METROS (p[10])
+    len: Number(p[9].replace(',', '.')),   // LARGURA EM CM (p[9])
+    comp: p[11]
+  };
+}
+
+function testeDebugServico() {
+  console.log("Tipo do DatabaseService:", typeof DatabaseService);
+  if (typeof DatabaseService !== "undefined") {
+    console.log("Métodos disponíveis:", Object.keys(DatabaseService));
+  }
+}
+
+/* ============================================================
+ *   📦 FUNÇÕES DE ESTOQUE - INTEGRADAS COM CONTROLLERS
+ * ============================================================ */
+
+/**
+ * Processa decisão do supervisor usando WorkflowService
+ * @param {Object} payload - Dados da decisão {id_do_rolo, decisao, observacoes}
+ * @returns {Object} - Resultado da operação
+ */
+function processSupervisorDecision_Web(payload) {
+  const startTime = new Date().getTime();
+  try {
+    const { id_do_rolo, decision, observacoes, categoria_defeito, acao_recomendada } = payload;
+    const decisao = decision || payload.decisao;
+    
+    Logger.log(`
+    ╔════════════════════════════════════════╗
+    ║ [SUPERVISOR] Processando Decisão       ║
+    ╚════════════════════════════════════════╝
+    Rolo ID: ${id_do_rolo}
+    Decisão: ${decisao}
+    Observações: ${observacoes || 'N/A'}
+    Categoria: ${categoria_defeito || 'N/A'}
+    Ação: ${acao_recomendada || 'N/A'}
+    Timestamp: ${new Date().toISOString()}
+    `);
+    
+    // Determina próximo status baseado na decisão (WorkflowService v6)
+    let nextStatus;
+    if (decisao.toLowerCase() === 'aprovado') {
+      nextStatus = 'aprovado_supervisor';
+      Logger.log(`[SUPERVISOR] ✅ Mapeamento: aprovado → aprovado_supervisor → em_estoque`);
+    } else if (decisao.toLowerCase() === 'reprovado') {
+      nextStatus = 'reprovado_supervisor';
+      Logger.log(`[SUPERVISOR] ❌ Mapeamento: reprovado → reprovado_supervisor → enviado_compras`);
+    } else {
+      throw new Error('Decisão inválida. Use "aprovado" ou "reprovado"');
+    }
+    
+    // Usa WorkflowService para transição
+    const user = Session.getActiveUser().getEmail();
+    Logger.log(`[SUPERVISOR] 👤 Usuário: ${user}`);
+    
+    Logger.log(`[SUPERVISOR] 🔄 Executando transição via WorkflowService...`);
+    let result = WorkflowService.transition(id_do_rolo, nextStatus, {
+      usuario: user,
+      notas: observacoes || `Decisão do supervisor: ${decisao}`,
+      categoria_defeito: categoria_defeito || 'N/A',
+      acao_recomendada: acao_recomendada || 'N/A'
+    });
+    
+    Logger.log(`[SUPERVISOR] ✅ Transição concluída:`);
+    Logger.log(`  De: ${result.de || 'N/A'}`);
+    Logger.log(`  Para: ${result.para || 'N/A'}`);
+    
+    // ✅ Transição automática para estado final (conforme WorkflowService v6)
+    if (result?.para === 'aprovado_supervisor') {
+      Logger.log(`[SUPERVISOR] 🔄 Transição automática: aprovado_supervisor → em_estoque`);
+      result = WorkflowService.transition(id_do_rolo, 'em_estoque', { usuario: user });
+      Logger.log(`[SUPERVISOR] ✅ Agora em: ${result.para}`);
+    }
+    
+    if (result?.para === 'reprovado_supervisor') {
+      Logger.log(`[SUPERVISOR] 🔄 Transição automática: reprovado_supervisor → enviado_compras`);
+      result = WorkflowService.transition(id_do_rolo, 'enviado_compras', { usuario: user });
+      Logger.log(`[SUPERVISOR] ✅ Agora em: ${result.para}`);
+    }
+    
+    // Se reprovado, gera PDF para Compras e envia email
+    let pdfUrl = null;
+    if (decisao.toLowerCase() === 'reprovado') {
+      Logger.log(`[SUPERVISOR] 📄 Gerando PDF de reprovação...`);
+      pdfUrl = generateReprovePDF_Web(id_do_rolo, observacoes);
+      Logger.log(`[SUPERVISOR] ✅ PDF gerado: ${pdfUrl}`);
+      
+      // Busca dados do rolo para enviar email
+      Logger.log(`[SUPERVISOR] 📧 Preparando email para Compras...`);
+      try {
+        const rollData = DatabaseService.databaseQuery({
+          collection: "INSPECOES",
+          where: [{ field: "ID_ROLO", op: "==", value: id_do_rolo }]
+        });
+        
+        if (rollData && rollData.length > 0) {
+          const roll = rollData[0];
+          const defeitos = roll.defeitos ? JSON.parse(typeof roll.defeitos === "string" ? roll.defeitos : "[]") : [];
+          
+          // Envia email para Compras
+          const emailOk = sendComprasEmail(roll, defeitos, { 
+            relatorioFileId: pdfUrl ? pdfUrl.split('/d/')[1]?.split('/')[0] : null,
+            pdfUrl: pdfUrl,
+            pdfBlob: null
+          });
+          Logger.log(`[SUPERVISOR] ${emailOk ? "✅" : "⚠️"} Email compras ${emailOk ? "enviado" : "falhou"}`);
+        }
+      } catch (emailErr) {
+        Logger.log(`[SUPERVISOR] ⚠️ Erro ao enviar email: ${emailErr.message}`);
+        // Não falha a operação, continua mesmo sem email
+      }
+    }
+    
+    const elapsed = new Date().getTime() - startTime;
+    Logger.log(`[SUPERVISOR] ⏱️ Tempo total: ${elapsed}ms`);
+    
+    return {
+      status: 'SUCESSO',
+      message: `Revisão ${decisao.toLowerCase()} com sucesso. Status: ${result.para}`,
+      fase_atual: result.para,
+      transicao: result,
+      pdfUrl: pdfUrl
+    };
+    
+  } catch (error) {
+    const elapsed = new Date().getTime() - startTime;
+    Logger.log(`
+    ╔════════════════════════════════════════╗
+    ║ [SUPERVISOR] ❌ ERRO                   ║
+    ╚════════════════════════════════════════╝
+    Erro: ${error.message}
+    Stack: ${error.stack || 'N/A'}
+    Tempo: ${elapsed}ms
+    `);
+    return {
+      status: 'ERRO',
+      message: error.message
+    };
+  }
+}
+
+/**
+ * Gera PDF de reprovação para o setor de Compras
+ * @param {string} idRolo - ID do rolo
+ * @param {string} motivo - Motivo da reprovação
+ * @returns {string} - URL do PDF
+ */
+function generateReprovePDF_Web(idRolo, motivo) {
+  const startTime = new Date().getTime();
+  try {
+    Logger.log(`
+    ╔════════════════════════════════════════╗
+    ║ [PDF] Gerando Reprovação               ║
+    ╚════════════════════════════════════════╝
+    Rolo ID: ${idRolo}
+    Motivo: ${motivo || 'Não especificado'}
+    `);
+    
+    // Busca dados do rolo
+    Logger.log(`[PDF] 🔍 Buscando dados do rolo: ${idRolo}`);
+    const dados = DatabaseService.databaseQuery({
+      collection: "INSPECOES",
+      where: [{ field: "ID_ROLO", op: "==", value: idRolo }]
+    });
+    
+    if (!dados || dados.length === 0) {
+      throw new Error(`Rolo ${idRolo} não encontrado na planilha`);
+    }
+    
+    Logger.log(`[PDF] ✅ Dados do rolo carregados`);
+    const roll = dados[0];
+    
+    try {
+      Logger.log(`[PDF] 📁 Preparando pastas do Drive...`);
+      const folders = DocumentService.getOrCreateRollFolder(idRolo);
+      
+      // Cria documento de reprovação
+      const docName = `REPROVAÇÃO_${idRolo}_${Date.now()}`;
+      Logger.log(`[PDF] 📄 Criando documento: ${docName}`);
+      const doc = DocumentApp.create(docName);
+      doc.moveToFolder(folders.relatorio);
+      
+      const body = doc.getBody();
+      body.clear();
+      
+      // Cabeçalho
+      body.appendParagraph("RELATÓRIO DE REPROVAÇÃO DE TECIDO")
+        .setHeading(DocumentApp.ParagraphHeading.HEADING1)
+        .setAlignment(DocumentApp.HorizontalAlignment.CENTER);
+      
+      body.appendParagraph("Setor de Compras - FA Maringá")
+        .setAlignment(DocumentApp.HorizontalAlignment.CENTER)
+        .setItalic(true);
+      
+      body.appendParagraph("");
+      
+      // Informações do rolo
+      body.appendParagraph("INFORMAÇÕES DO ROLO")
+        .setHeading(DocumentApp.ParagraphHeading.HEADING2);
+      
+      const table1 = body.appendTable([
+        ["Campo", "Valor"],
+        ["ID do Rolo", String(roll.id_do_rolo || "N/A")],
+        ["Revision ID", String(roll.revision_id || "N/A")],
+        ["Fornecedor", String(roll.fornecedor || "N/A")],
+        ["Produto ID", String(roll.produto_id || "N/A")],
+        ["Lote", String(roll.lote || "N/A")],
+        ["Localização", String(roll.localizacao || "N/A")],
+        ["Tipo de Tecido", String(roll.tipo_tecido || "N/A")],
+        ["Largura (cm)", String(roll.largura_cm || "N/A")],
+        ["Metros Fornecedor", String(roll.metros_maquina || "N/A")],
+        ["Cor", String(roll.cor || "N/A")]
+      ]);
+      
+      // Formatação da tabela
+      for (let i = 0; i < table1.getNumRows(); i++) {
+        const row = table1.getRow(i);
+        if (i === 0) {
+          row.getCell(0).getChild(0).asParagraph().setBold(true);
+          row.getCell(1).getChild(0).asParagraph().setBold(true);
+        }
+      }
+      
+      body.appendParagraph("");
+      
+      // Motivo da reprovação
+      body.appendParagraph("MOTIVO DA REPROVAÇÃO")
+        .setHeading(DocumentApp.ParagraphHeading.HEADING2);
+      
+      body.appendParagraph(String(motivo || "Não informado"))
+        .setForegroundColor("#e02424")
+        .setBold(true);
+      
+      body.appendParagraph("");
+      
+      // Defeitos encontrados
+      const defeitos = roll.defeitos ? JSON.parse(typeof roll.defeitos === "string" ? roll.defeitos : "[]") : [];
+      if (defeitos.length > 0) {
+        body.appendParagraph("DEFEITOS ENCONTRADOS")
+          .setHeading(DocumentApp.ParagraphHeading.HEADING2);
+        
+        const defectsTable = [["Tipo", "Metragem", "Gravidade", "Observações"]];
+        defeitos.forEach(d => {
+          defectsTable.push([
+            String(d.tipo_defeito || "N/A"),
+            `${String(d.metragem_inicial || 0)} - ${String(d.metragem_final || 0)}m`,
+            String(d.gravidade || "N/A"),
+            String(d.observacoes || "-")
+          ]);
+        });
+        
+        const table2 = body.appendTable(defectsTable);
+        for (let i = 0; i < table2.getNumRows(); i++) {
+          if (i === 0) {
+            table2.getRow(i).getCell(0).getChild(0).asParagraph().setBold(true);
+            table2.getRow(i).getCell(1).getChild(0).asParagraph().setBold(true);
+            table2.getRow(i).getCell(2).getChild(0).asParagraph().setBold(true);
+            table2.getRow(i).getCell(3).getChild(0).asParagraph().setBold(true);
+          }
+        }
+        
+        body.appendParagraph("");
+      }
+      
+      // Ação requerida
+      body.appendParagraph("AÇÃO REQUERIDA")
+        .setHeading(DocumentApp.ParagraphHeading.HEADING2);
+      
+      body.appendParagraph("Por favor, entre em contato com o fornecedor para resolver os problemas identificados acima.")
+        .setBold(true);
+      
+      body.appendParagraph("Data: " + Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "dd/MM/yyyy HH:mm"))
+        .setItalic(true);
+      
+      // Exporta como PDF
+      const docId = doc.getId();
+      const blob = DriveApp.getFileById(docId).getAs("application/pdf");
+      const pdfFile = folders.relatorio.createFile(blob);
+      pdfFile.setName(`REPROVAÇÃO_${idRolo}_${Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyyMMdd_HHmm")}.pdf`);
+      
+      // Remove o documento temporário (mantém apenas o PDF)
+      DriveApp.getFileById(docId).setTrashed(true);
+      
+      // Retorna URL do PDF
+      const pdfUrl = "https://drive.google.com/file/d/" + pdfFile.getId();
+      
+      const elapsed = new Date().getTime() - startTime;
+      Logger.log(`
+      ╔════════════════════════════════════════╗
+      ║ [PDF] ✅ Sucesso                       ║
+      ╚════════════════════════════════════════╝
+      URL: ${pdfUrl}
+      Arquivo: ${pdfFile.getName()}
+      Tempo: ${elapsed}ms
+      `);
+      
+      return pdfUrl;
+      
+    } catch (docError) {
+      const elapsed = new Date().getTime() - startTime;
+      Logger.log(`
+      ╔════════════════════════════════════════╗
+      ║ [PDF] ⚠️ Erro ao criar documento       ║
+      ╚════════════════════════════════════════╝
+      Erro: ${docError.message}
+      Fallback: Google Drive Search
+      Tempo: ${elapsed}ms
+      `);
+      return `https://drive.google.com/drive/search?q=${encodeURIComponent(idRolo)}`;
+    }
+    
+  } catch (error) {
+    const elapsed = new Date().getTime() - startTime;
+    Logger.log(`
+    ╔════════════════════════════════════════╗
+    ║ [PDF] ❌ ERRO CRÍTICO                  ║
+    ╚════════════════════════════════════════╝
+    Erro: ${error.message}
+    Stack: ${error.stack || 'N/A'}
+    Tempo: ${elapsed}ms
+    `);
+    return null;
+  }
+}
+
+/**
+ * Gera PDF da revisão usando DocumentService
+ * @param {string} idRolo - ID do rolo
+ * @returns {Object} - URL do PDF e informações
+ */
+function generateRevisionPDF_Web(idRolo) {
+  try {
+    Logger.log(`[PDF] Gerando PDF para rolo: ${idRolo}`);
+    
+    // Busca dados completos do rolo
+    const roll = DatabaseService._get('INSPECOES', idRolo);
+    if (!roll) {
+      throw new Error('Rolo não encontrado');
+    }
+    
+    // Usa DocumentService para gerar PDF
+    const pdfUrl = DocumentService.generateRevisionPDFLink(idRolo, 'supervisor');
+    
+    return {
+      status: 'SUCESSO',
+      pdfUrl: pdfUrl,
+      rollData: roll
+    };
+    
+  } catch (error) {
+    Logger.log(`[PDF] Erro ao gerar PDF: ${error.message}`);
+    return {
+      status: 'ERRO',
+      message: error.message
+    };
+  }
+}
+
+/**
+ * FUNÇÃO PRINCIPAL: Retorna rolos filtrados por status
+ * Esta é a ÚNICA fonte de verdade para esta operação
+ */
+function getRollsByStatus_Web(payload) {
+  const startTime = new Date().getTime();
+  try {
+    Logger.log('\n╔══════════════════════════════════════════════════════════╗');
+    Logger.log('║ [APP] getRollsByStatus_Web INICIADO                    ║');
+    Logger.log('╚══════════════════════════════════════════════════════════╝');
+    
+    // ETAPA 1: VALIDAÇÃO
+    Logger.log('\n[APP] 📥 ETAPA 1: VALIDAÇÃO DO PAYLOAD');
+    Logger.log('[APP] Tipo: ' + typeof payload);
+    Logger.log('[APP] JSON: ' + JSON.stringify(payload));
+    
+    if (!payload || typeof payload !== 'object') {
+      Logger.log('[APP] ❌ Payload inválido!');
+      return [];
+    }
+    Logger.log('[APP] ✅ Payload válido');
+    
+    // ETAPA 2: EXTRAÇÃO DO STATUS
+    Logger.log('\n[APP] 📋 ETAPA 2: EXTRAÇÃO DO STATUS');
+    const statusRaw = payload.status;
+    Logger.log('[APP] Valor recebido: "' + statusRaw + '"');
+    Logger.log('[APP] Tipo: ' + typeof statusRaw);
+    
+    const status = String(statusRaw || '').trim().toLowerCase();
+    Logger.log('[APP] Status normalizado: "' + status + '"');
+    Logger.log('[APP] Comprimento: ' + status.length);
+    
+    // ETAPA 3: CONSTRUÇÃO DA QUERY
+    Logger.log('\n[APP] 🔧 ETAPA 3: PREPARAÇÃO DA QUERY');
+    const queryParams = {
+      collection: 'INSPECOES',
+      where: [{ field: 'FASE_ATUAL', op: '==', value: status }]
+    };
+    Logger.log('[APP] Collection: ' + queryParams.collection);
+    Logger.log('[APP] Field: ' + queryParams.where[0].field);
+    Logger.log('[APP] Value: "' + queryParams.where[0].value + '"');
+    
+    // ETAPA 4: EXECUÇÃO
+    Logger.log('\n[APP] ⚙️ ETAPA 4: EXECUTANDO QUERY');
+    const queryStart = new Date().getTime();
+    const rolos = DatabaseService.databaseQuery(queryParams);
+    const queryTime = new Date().getTime() - queryStart;
+    Logger.log('[APP] Query completada em ' + queryTime + 'ms');
+    
+    // ETAPA 5: ANÁLISE DA RESPOSTA
+    Logger.log('\n[APP] 📊 ETAPA 5: ANÁLISE DA RESPOSTA');
+    Logger.log('[APP] Tipo: ' + typeof rolos);
+    Logger.log('[APP] É Array? ' + Array.isArray(rolos));
+    Logger.log('[APP] É null? ' + (rolos === null));
+    Logger.log('[APP] É undefined? ' + (rolos === undefined));
+    
+    let count = 0;
+    if (Array.isArray(rolos)) {
+      count = rolos.length;
+      Logger.log('[APP] ✅ Array.length = ' + count);
+    } else if (rolos && typeof rolos === 'object') {
+      Logger.log('[APP] ⚠️ Resultado é OBJETO, não array!');
+      count = 1;
+    } else {
+      Logger.log('[APP] ⚠️ Resultado é ' + typeof rolos);
+      count = 0;
+    }
+    
+    // ETAPA 6: AMOSTRAGEM
+    Logger.log('\n[APP] 📦 ETAPA 6: AMOSTRAGEM DE DADOS');
+    if (Array.isArray(rolos) && count > 0) {
+      Logger.log('[APP] Mostrando até 3 de ' + count + ' rolos:');
+      rolos.slice(0, 3).forEach(function(rolo, idx) {
+        Logger.log('\n[APP] [Rolo ' + (idx + 1) + ']');
+        Logger.log('[APP]   - FORNECEDOR: ' + (rolo.FORNECEDOR || 'N/A'));
+        Logger.log('[APP]   - ID_ROLO: ' + (rolo.ID_ROLO || 'N/A'));
+        Logger.log('[APP]   - FASE_ATUAL: ' + (rolo.FASE_ATUAL || 'N/A'));
+      });
+    } else if (count === 0) {
+      Logger.log('[APP] ⚠️ NENHUM ROLO ENCONTRADO para status: "' + status + '"');
+    }
+    
+    // ETAPA 7: RETORNO
+    Logger.log('\n[APP] 🔐 ETAPA 7: PREPARAÇÃO DO RETORNO');
+    let resultFinal = [];
+    
+    if (Array.isArray(rolos)) {
+      resultFinal = rolos;
+      Logger.log('[APP] ✅ Retornando array com ' + resultFinal.length + ' elementos');
+    } else if (rolos && typeof rolos === 'object') {
+      resultFinal = [rolos];
+      Logger.log('[APP] ⚠️ Objeto convertido para array');
+    } else {
+      resultFinal = [];
+      Logger.log('[APP] ℹ️ Retornando array vazio');
+    }
+    
+    // Garante serialização correta dos dados
+    const serializedResult = JSON.parse(JSON.stringify(resultFinal));
+    
+    const totalTime = new Date().getTime() - startTime;
+    Logger.log('\n╔══════════════════════════════════════════════════════════╗');
+    Logger.log('║ [APP] ✅ SUCESSO - RETORNANDO PARA FRONTEND              ║');
+    Logger.log('╚══════════════════════════════════════════════════════════╝');
+    Logger.log('[APP] Length: ' + serializedResult.length);
+    Logger.log('[APP] Tempo total: ' + totalTime + 'ms');
+    
+    return serializedResult;
+    
+  } catch (error) {
+    const elapsed = new Date().getTime() - startTime;
+    Logger.log('\n╔══════════════════════════════════════════════════════════╗');
+    Logger.log('║ [APP] ❌ ERRO CRÍTICO!                                  ║');
+    Logger.log('╚══════════════════════════════════════════════════════════╝');
+    Logger.log('[APP] Erro: ' + error.message);
+    Logger.log('[APP] Stack: ' + (error.stack || 'N/A'));
+    
+    return [];
+  }
+}
+
+/* ============================================================
+ *   🧦 CONTROLE DE UNIDADES (GOLA, PUNHO)
+ * ============================================================ */
+
+const UNIDADES_SHEETS = ['GOLA', 'PUNHO'];
+const UNIDADES_HEADERS = [
+  'ID',
+  'TIPO',
+  'NOTA_FISCAL',
+  'CODIGO',
+  'REFERENCIA',
+  'TAMANHO',
+  'COR',
+  'QUANTIDADE',
+  'VALOR_UNITARIO',
+  'ESTOQUE_MINIMO',
+  'DATA_CRIACAO',
+  'ULTIMA_MOVIMENTACAO',
+  'CRIADO_POR'
+];
+
+function getUnidadesSpreadsheet_() {
+  return SpreadsheetApp.openById(CONFIG.IDS.SHEET_ID);
+}
+
+function normalizeHeader_(value) {
+  return String(value || '').trim().toUpperCase();
+}
+
+function ensureUnidadesSheet_(sheetName) {
+  const ss = getUnidadesSpreadsheet_();
+  let sheet = ss.getSheetByName(sheetName);
+  if (!sheet) {
+    sheet = ss.insertSheet(sheetName);
+  }
+
+  const headerRange = sheet.getRange(1, 1, 1, UNIDADES_HEADERS.length);
+  const existingHeaders = headerRange.getValues()[0].map(normalizeHeader_);
+  const hasAllHeaders = UNIDADES_HEADERS.every((h, i) => existingHeaders[i] === h);
+  if (!hasAllHeaders) {
+    headerRange.setValues([UNIDADES_HEADERS]);
+  }
+
+  return sheet;
+}
+
+function getHeaderMap_(headers) {
+  const map = {};
+  headers.forEach((h, index) => {
+    map[normalizeHeader_(h)] = index;
+  });
+  return map;
+}
+
+function readUnidadesFromSheet_(sheetName) {
+  const sheet = ensureUnidadesSheet_(sheetName);
+  const data = sheet.getDataRange().getValues();
+  if (data.length < 2) return [];
+
+  const headers = data[0];
+  const headerMap = getHeaderMap_(headers);
+  const rows = data.slice(1);
+
+  return rows
+    .filter((row) => row.some((cell) => String(cell).trim() !== ''))
+    .map((row) => {
+      const getValue = (key) => row[headerMap[key]];
+      return {
+        id: String(getValue('ID') || ''),
+        tipo: String(getValue('TIPO') || sheetName),
+        referencia: String(getValue('REFERENCIA') || ''),
+        tamanho: String(getValue('TAMANHO') || ''),
+        cor: String(getValue('COR') || ''),
+        quantidade: parseInt(getValue('QUANTIDADE') || 0, 10),
+        valor_unitario: parseFloat(getValue('VALOR_UNITARIO') || 0),
+        estoque_minimo: parseInt(getValue('ESTOQUE_MINIMO') || 0, 10),
+        data_criacao: String(getValue('DATA_CRIACAO') || ''),
+        ultima_movimentacao: String(getValue('ULTIMA_MOVIMENTACAO') || ''),
+        criado_por: String(getValue('CRIADO_POR') || '')
+      };
+    })
+    .filter((item) => item.id || item.referencia);
+}
+
+function findUnidadeRowById_(id) {
+  const ss = getUnidadesSpreadsheet_();
+  for (const sheetName of UNIDADES_SHEETS) {
+    const sheet = ensureUnidadesSheet_(sheetName);
+    const data = sheet.getDataRange().getValues();
+    if (data.length < 2) continue;
+
+    const headers = data[0];
+    const headerMap = getHeaderMap_(headers);
+    const idIndex = headerMap.ID;
+    if (idIndex === undefined) continue;
+
+    for (let i = 1; i < data.length; i++) {
+      const rowId = String(data[i][idIndex] || '').trim();
+      if (rowId === id) {
+        return { sheet, rowIndex: i + 1, headers, headerMap };
+      }
+    }
+  }
+
+  return null;
+}
+
+function getUnidades_Web() {
+  try {
+    Logger.log('[APP] 🧦 getUnidades_Web iniciado');
+
+    const unidades = UNIDADES_SHEETS
+      .flatMap((sheetName) => readUnidadesFromSheet_(sheetName))
+      .sort((a, b) => {
+        const tipoA = String(a.tipo || '').localeCompare(String(b.tipo || ''));
+        if (tipoA !== 0) return tipoA;
+        return String(a.referencia || '').localeCompare(String(b.referencia || ''));
+      });
+
+    Logger.log('[APP] ✅ Unidades encontradas: ' + unidades.length);
+    return unidades;
+    
+  } catch (error) {
+    Logger.log('[APP] ❌ Erro em getUnidades_Web: ' + error.message);
+    return [];
+  }
+}
+
+function addUnidade_Web(payload) {
+  try {
+    Logger.log('[APP] 🧦 addUnidade_Web iniciado');
+    
+    if (!payload.tipo || !payload.codigo) {
+      throw new Error('Tipo e código são obrigatórios');
+    }
+
+    const tipo = String(payload.tipo || '').toUpperCase().trim();
+    if (!UNIDADES_SHEETS.includes(tipo)) {
+      throw new Error('Tipo inválido. Use GOLA ou PUNHO');
+    }
+
+    const sheet = ensureUnidadesSheet_(tipo);
+    const headers = UNIDADES_HEADERS;
+    const headerMap = getHeaderMap_(headers);
+    
+    const novaUnidade = {
+      id: Utilities.getUuid(),
+      tipo,
+      nota_fiscal: String(payload.nota_fiscal || 'S/N').trim(),
+      codigo: String(payload.codigo || '').trim(),
+      referencia: payload.referencia || '',
+      tamanho: payload.tamanho || '',
+      cor: String(payload.cor || '').trim(),
+      quantidade: parseInt(payload.quantidade) || 0,
+      valor_unitario: parseFloat(payload.valor_unitario) || 0,
+      estoque_minimo: parseInt(payload.estoque_minimo) || 10,
+      data_criacao: new Date().toISOString(),
+      ultima_movimentacao: new Date().toISOString(),
+      criado_por: Session.getActiveUser().getEmail()
+    };
+
+    const row = new Array(headers.length).fill('');
+    row[headerMap.ID] = novaUnidade.id;
+    row[headerMap.TIPO] = novaUnidade.tipo;
+    row[headerMap.NOTA_FISCAL] = novaUnidade.nota_fiscal;
+    row[headerMap.CODIGO] = novaUnidade.codigo;
+    row[headerMap.REFERENCIA] = novaUnidade.referencia;
+    row[headerMap.TAMANHO] = novaUnidade.tamanho;
+    row[headerMap.COR] = novaUnidade.cor;
+    row[headerMap.QUANTIDADE] = novaUnidade.quantidade;
+    row[headerMap.VALOR_UNITARIO] = novaUnidade.valor_unitario;
+    row[headerMap.ESTOQUE_MINIMO] = novaUnidade.estoque_minimo;
+    row[headerMap.DATA_CRIACAO] = novaUnidade.data_criacao;
+    row[headerMap.ULTIMA_MOVIMENTACAO] = novaUnidade.ultima_movimentacao;
+    row[headerMap.CRIADO_POR] = novaUnidade.criado_por;
+
+    sheet.appendRow(row);
+    
+    Logger.log('[APP] ✅ Unidade adicionada: ' + novaUnidade.id);
+    return { status: 'SUCESSO', id: novaUnidade.id };
+    
+  } catch (error) {
+    Logger.log('[APP] ❌ Erro em addUnidade_Web: ' + error.message);
+    return { status: 'ERRO', message: error.message };
+  }
+}
+
+function movimentarUnidade_Web(payload) {
+  try {
+    Logger.log('[APP] 🧦 movimentarUnidade_Web iniciado');
+    
+    if (!payload.id || !payload.tipo || !payload.quantidade) {
+      throw new Error('ID, tipo e quantidade são obrigatórios');
+    }
+
+    const unidadeRow = findUnidadeRowById_(String(payload.id));
+    if (!unidadeRow) {
+      throw new Error('Unidade não encontrada');
+    }
+
+    const { sheet, rowIndex, headerMap } = unidadeRow;
+    const quantidadeAtual = parseInt(sheet.getRange(rowIndex, headerMap.QUANTIDADE + 1).getValue() || 0, 10);
+    const quantidade = parseInt(payload.quantidade);
+    const tipoMov = payload.tipo.toUpperCase(); // ENTRADA, SAIDA ou DELETE
+    
+    // Se for DELETE, remove a linha inteira
+    if (tipoMov === 'DELETE') {
+      sheet.deleteRow(rowIndex);
+      Logger.log('[APP] 🗑️ Unidade deletada: ' + payload.id + ' (linha ' + rowIndex + ')');
+      return { status: 'SUCESSO', message: 'Unidade excluída com sucesso' };
+    }
+    
+    let novaQuantidade = quantidadeAtual;
+    if (tipoMov === 'ENTRADA') {
+      novaQuantidade += quantidade;
+    } else if (tipoMov === 'SAIDA') {
+      novaQuantidade -= quantidade;
+      if (novaQuantidade < 0) {
+        throw new Error('Estoque insuficiente para esta saída');
+      }
+    } else {
+      throw new Error('Tipo de movimentação inválido. Use ENTRADA, SAIDA ou DELETE');
+    }
+
+    const ultimaMov = new Date().toISOString();
+    sheet.getRange(rowIndex, headerMap.QUANTIDADE + 1).setValue(novaQuantidade);
+    if (headerMap.ULTIMA_MOVIMENTACAO !== undefined) {
+      sheet.getRange(rowIndex, headerMap.ULTIMA_MOVIMENTACAO + 1).setValue(ultimaMov);
+    }
+    
+    Logger.log('[APP] ✅ Movimentação registrada para unidade: ' + payload.id);
+    return { status: 'SUCESSO', novaQuantidade };
+    
+  } catch (error) {
+    Logger.log('[APP] ❌ Erro em movimentarUnidade_Web: ' + error.message);
+    return { status: 'ERRO', message: error.message };
+  }
+}
+
+/* ============================================================
+ *   🛒 PROCESSAMENTO DE DECISÕES DE COMPRAS
+ * ============================================================ */
+
+function processarDecisaoCompras_Web(payload) {
+  const startTime = new Date().getTime();
+  try {
+    const { 
+      idRolo, 
+      statusFinal, 
+      comprador, 
+      observacoes,
+      tipoDecisao,        // 'desconto', 'devolucao', 'uso_com_ressalvas', 'reprovado_definitivo'
+      respostaCompras,    // Resposta detalhada do setor
+      voltarEstoque,      // boolean
+      motivoRessalvas     // Motivo se volta com ressalvas
+    } = payload;
+    
+    Logger.log(`
+    ╔════════════════════════════════════════╗
+    ║ [COMPRAS] Processando Decisão           ║
+    ╚════════════════════════════════════════╝
+    Rolo ID: ${idRolo}
+    Status Final: ${statusFinal}
+    Tipo Decisão: ${tipoDecisao || 'N/A'}
+    Comprador: ${comprador}
+    Observações: ${observacoes || 'N/A'}
+    Resposta: ${respostaCompras || 'N/A'}
+    Volta Estoque: ${voltarEstoque ? 'SIM' : 'NÃO'}
+    Timestamp: ${new Date().toISOString()}
+    `);
+    
+    // Determina próximo status baseado na decisão
+    let nextStatus;
+    if (statusFinal.toUpperCase() === 'APROVADO_COMPRAS') {
+      nextStatus = 'aprovado_compras';
+      Logger.log(`[COMPRAS] ✅ Mapeamento: APROVADO_COMPRAS → aprovado_compras`);
+    } else if (statusFinal.toUpperCase() === 'REPROVADO_COMPRAS') {
+      nextStatus = 'reprovado_compras';
+      Logger.log(`[COMPRAS] ❌ Mapeamento: REPROVADO_COMPRAS → reprovado_compras`);
+    } else {
+      throw new Error('Status final inválido. Use "APROVADO_COMPRAS" ou "REPROVADO_COMPRAS"');
+    }
+    
+    // Usa WorkflowService para transição
+    const user = comprador || Session.getActiveUser().getEmail();
+    Logger.log(`[COMPRAS] 👤 Usuário: ${user}`);
+    
+    Logger.log(`[COMPRAS] 🔄 Executando transição via WorkflowService...`);
+    const result = WorkflowService.transition(idRolo, nextStatus, {
+      usuario: user,
+      notas: observacoes || `Decisão do compras: ${statusFinal}`
+    });
+    
+    Logger.log(`[COMPRAS] ✅ Transição concluída:`);
+    Logger.log(`  De: ${result.de || 'N/A'}`);
+    Logger.log(`  Para: ${result.para || 'N/A'}`);
+    
+    // Atualiza campos específicos de compras no rolo
+    const comprasData = {
+      compras_tipo_decisao: tipoDecisao || '',
+      compras_resposta: respostaCompras || observacoes || '',
+      compras_responsavel: user,
+      compras_data_decisao: new Date().toISOString(),
+      disponivel_com_ressalvas: false,
+      motivo_ressalvas: ''
+    };
+    
+    // Se aprovado E deve voltar ao estoque
+    if (statusFinal.toUpperCase() === 'APROVADO_COMPRAS' && voltarEstoque !== false) {
+      Logger.log(`[COMPRAS] 📦 Movendo para estoque...`);
+      
+      // Se tipo de decisão for 'uso_com_ressalvas', marca flag
+      if (tipoDecisao === 'uso_com_ressalvas' || motivoRessalvas) {
+        comprasData.disponivel_com_ressalvas = true;
+        comprasData.motivo_ressalvas = motivoRessalvas || respostaCompras || 'Tecido reprovado pelo supervisor, mas aprovado para uso com ressalvas pelo setor de compras';
+        Logger.log(`[COMPRAS] ⚠️ Marcado como DISPONÍVEL COM RESSALVAS`);
+      }
+      
+      // Atualiza dados de compras ANTES de mover para estoque
+      DatabaseService.rolls.update(idRolo, comprasData);
+      
+      WorkflowService.transition(idRolo, 'em_estoque', {
+        usuario: user,
+        notas: comprasData.disponivel_com_ressalvas 
+          ? 'Movido para estoque com ressalvas após análise de compras'
+          : 'Movido para estoque após aprovação de compras'
+      });
+      
+      Logger.log(`[COMPRAS] ✅ Movido para estoque${comprasData.disponivel_com_ressalvas ? ' (COM RESSALVAS)' : ''}`);
+    } else if (statusFinal.toUpperCase() === 'REPROVADO_COMPRAS') {
+      // Se reprovado definitivamente, atualiza dados
+      DatabaseService.rolls.update(idRolo, comprasData);
+      WorkflowService.transition(idRolo, 'finalizado_reprovado', {
+        usuario: user,
+        notas: 'Reprovado definitivamente pelo setor de compras'
+      });
+      Logger.log(`[COMPRAS] ❌ Reprovado definitivamente - NÃO voltará ao estoque`);
+    } else {
+      // Só atualiza dados sem mover
+      DatabaseService.rolls.update(idRolo, comprasData);
+    }
+    
+    const elapsed = new Date().getTime() - startTime;
+    Logger.log(`[COMPRAS] ⏱️ Tempo total: ${elapsed}ms`);
+    
+    return {
+      status: 'SUCESSO',
+      message: `Decisão de compras processada. Status: ${result.para}`,
+      fase_atual: result.para,
+      transicao: result,
+      disponivel_com_ressalvas: comprasData.disponivel_com_ressalvas
+    };
+    
+  } catch (error) {
+    const elapsed = new Date().getTime() - startTime;
+    Logger.log(`
+    ╔════════════════════════════════════════╗
+    ║ [COMPRAS] ❌ ERRO                       ║
+    ╚════════════════════════════════════════╝
+    Erro: ${error.message}
+    Stack: ${error.stack || 'N/A'}
+    Tempo: ${elapsed}ms
+    `);
+    return {
+      status: 'ERRO',
+      message: error.message
+    };
+  }
+}
+
+/* ============================================================
+ *   📸 BUSCAR FOTOS DO ROLO
+ * ============================================================ */
+function getFotosByRevisionId_Web(revisionId) {
+  try {
+    Logger.log('[APP] 📸 Buscando fotos para revisionId: ' + revisionId);
+    
+    if (!revisionId) {
+      Logger.log('[APP] ⚠️ revisionId vazio');
+      return [];
+    }
+    
+    // Query na tabela FOTOS para buscar todas as URLs deste rolo
+    const query = {
+      collection: 'FOTOS',
+      where: [{ field: 'REVISION_ID', op: '==', value: String(revisionId).trim() }]
+    };
+    
+    const fotos = DatabaseService.databaseQuery(query);
+    
+    if (!Array.isArray(fotos)) {
+      Logger.log('[APP] ⚠️ Retorno não é array: ' + typeof fotos);
+      return [];
+    }
+    
+    Logger.log('[APP] ✅ ' + fotos.length + ' fotos encontradas');
+    
+    // Retorna array com as URLs
+    return fotos.map(f => ({
+      url: f.URL_FOTO || f.url_foto || '',
+      tipo: f.TIPO_FOTO || f.tipo_foto || 'GERAL',
+      timestamp: f.TIMESTAMP || f.timestamp || ''
+    })).filter(f => f.url);
+    
+  } catch (error) {
+    Logger.log('[APP] ❌ Erro ao buscar fotos: ' + error.message);
+    return [];
+  }
+}
+
+function getImageAsBase64_Web(driveUrl) {
+  try {
+    Logger.log('[APP] 🖼️ Convertendo imagem para base64: ' + driveUrl);
+    
+    if (!driveUrl) {
+      Logger.log('[APP] ⚠️ URL vazia');
+      return null;
+    }
+    
+    // Faz o fetch da imagem
+    const response = UrlFetchApp.fetch(driveUrl, {
+      muteHttpExceptions: true,
+      headers: {
+        'Authorization': 'Bearer ' + ScriptApp.getOAuthToken()
+      }
+    });
+    
+    if (response.getResponseCode() !== 200) {
+      Logger.log('[APP] ⚠️ Erro ao buscar imagem: ' + response.getResponseCode());
+      return null;
+    }
+    
+    // Converte para base64
+    const blob = response.getBlob();
+    const contentType = blob.getContentType();
+    const base64 = Utilities.base64Encode(blob.getBytes());
+    
+    // Retorna como data URI
+    const dataUri = 'data:' + contentType + ';base64,' + base64;
+    Logger.log('[APP] ✅ Imagem convertida para base64 (~' + Math.round(base64.length / 1024) + 'KB)');
+    
+    return dataUri;
+    
+  } catch (error) {
+    Logger.log('[APP] ❌ Erro ao converter imagem: ' + error.message);
+    return null;
+  }
+}
+
+function getReviewerMetrics_Web(periodos_dias) {
+  try {
+    const dias = periodos_dias || 30;
+    Logger.log('[APP] 👥 Buscando métricas de revisores para os últimos ' + dias + ' dias');
+    
+    const metrics = DatabaseService.getReviewerMetrics(dias);
+    
+    Logger.log('[APP] ✅ Métricas de revisores recuperadas');
+    return metrics;
+    
+  } catch (error) {
+    Logger.log('[APP] ❌ Erro ao buscar métricas de revisores: ' + error.message);
+    return {
+      status: 'erro',
+      mensagem: error.message,
+      ranking: [],
+      resumo: {}
+    };
+  }
+}
+
+function getReviewerMetricsRange_Web(startDate, endDate) {
+  try {
+    Logger.log('[APP] 👥 Buscando métricas de revisores por período');
+    const metrics = DatabaseService.getReviewerMetricsRange(startDate, endDate);
+    Logger.log('[APP] ✅ Métricas de revisores recuperadas (range)');
+    return metrics;
+  } catch (error) {
+    Logger.log('[APP] ❌ Erro ao buscar métricas de revisores (range): ' + error.message);
+    return {
+      status: 'erro',
+      mensagem: error.message,
+      ranking: [],
+      resumo: {}
+    };
+  }
+}
+
+/**
+ * =========================================================
+ * 📊 KPI DASHBOARD - Métricas em Tempo Real
+ * =========================================================
+ * Retorna dados reais para o Dashboard KPI (gestores):
+ * - Taxa de Reprovacao: reprovados / (aprovados + reprovados)
+ * - Defeitos/100m: defeitos / metros * 100
+ * - Pendencias: % de pendentes no periodo
+ * - Tempo medio de analise: dias entre registro e decisao
+ */
+function getKPIDashboardData() {
+  try {
+    Logger.log('[APP] 📊 [KPI] Iniciando coleta consolidada de KPI Dashboard');
+    
+    // 1️⃣ BUSCAR ROLOS DE TODOS OS STATUS (padrão: usar fase_atual como chave)
+    const todasAsFases = [
+      'aprovado_revisor',
+      'aprovado_supervisor',
+      'aprovado_compras',
+      'em_estoque',
+      'aguardando_supervisor',
+      'em_revisao',
+      'em_compra',
+      'enviado_compras',
+      'negociando',
+      'reprovado_supervisor',
+      'reprovado_compras',
+      'finalizado_reprovado'
+    ];
+    
+    let allRollosConsolidados = [];
+    
+    todasAsFases.forEach(function(fase) {
+      try {
+        const queryParams = { collection: 'INSPECOES', where: [{ field: 'FASE_ATUAL', op: '==', value: fase }] };
+        const rolos = DatabaseService.databaseQuery(queryParams) || [];
+        const rolosArray = Array.isArray(rolos) ? rolos : (rolos ? [rolos] : []);
+        allRollosConsolidados = allRollosConsolidados.concat(rolosArray);
+        Logger.log('[APP] 📦 [KPI] Fase "' + fase + '": ' + rolosArray.length + ' rolos');
+      } catch (e) {
+        Logger.log('[APP] ⚠️ [KPI] Erro ao buscar fase "' + fase + '": ' + e.message);
+      }
+    });
+    
+    Logger.log('[APP] 📦 [KPI] Total consolidado: ' + allRollosConsolidados.length + ' rolos');
+    
+    // 2️⃣ DATAS PARA FILTRO MENSAL
+    const now = new Date();
+    const dataAtual = Utilities.formatDate(now, 'GMT-3', 'yyyy-MM-dd');
+    const inicioMes = Utilities.formatDate(
+      new Date(now.getFullYear(), now.getMonth(), 1),
+      'GMT-3',
+      'yyyy-MM-dd'
+    );
+    
+    Logger.log('[APP] 📅 [KPI] Periodo: ' + inicioMes + ' ate ' + dataAtual);
+    
+    // 3️⃣ CONTAR POR FASE_ATUAL
+    let aprovados = 0;
+    let reprovados = 0;
+    let pendentes = 0;
+    let total_periodo = 0;
+    let total_defeitos = 0;
+    let total_metros = 0;
+    let soma_tempo_dias = 0;
+    let tempo_count = 0;
+
+    function normalizeStatus(rolo) {
+      return String(
+        rolo.FASE_ATUAL || rolo.fase_atual || rolo.STATUS_FINAL || rolo.status_final ||
+        rolo.STATUS_COMPRAS || rolo.status_compras || ''
+      ).toLowerCase().trim();
+    }
+
+    function isAprovado(status) {
+      return status.indexOf('aprovado') !== -1 || status === 'em_estoque';
+    }
+
+    function isReprovado(status) {
+      return status.indexOf('reprovado') !== -1;
+    }
+
+    function isPendente(status) {
+      return status.indexOf('aguardando') !== -1 || status.indexOf('revisao') !== -1 ||
+        status.indexOf('pendente') !== -1 || status === 'em_revisao';
+    }
+
+    function getDateValue(rolo) {
+      const raw = rolo.DATA_ATUALIZACAO || rolo.data_atualizacao ||
+        rolo.DATA_REGISTRO || rolo.created_at || rolo.DATA_REVISAO || rolo.data_revisao || null;
+      if (!raw) return null;
+      const d = new Date(raw);
+      return isNaN(d.getTime()) ? null : d;
+    }
+
+    function getMetros(rolo) {
+      return Number(rolo.METROS_REVISADO || rolo.metros_revisado || rolo.METROS_FORNECEDOR || rolo.metros_fornecedor || 0) || 0;
+    }
+
+    function getDefeitosCount(rolo) {
+      const raw = rolo.DEFEITOS || rolo.defeitos || [];
+      if (Array.isArray(raw)) return raw.length;
+      if (typeof raw === 'string') {
+        try {
+          const parsed = JSON.parse(raw);
+          return Array.isArray(parsed) ? parsed.length : 0;
+        } catch (e) {
+          return 0;
+        }
+      }
+      return 0;
+    }
+    
+    allRollosConsolidados.forEach(function(rolo) {
+      if (!rolo) return;
+      
+      // Campo de fase (pode vir em diferentes formatos)
+      const faseAtual = normalizeStatus(rolo);
+      const data = getDateValue(rolo);
+      if (!data) return;
+
+      const dataStr = Utilities.formatDate(data, 'GMT-3', 'yyyy-MM-dd');
+      if (dataStr < inicioMes || dataStr > dataAtual) return;
+
+      total_periodo++;
+
+      if (isAprovado(faseAtual)) aprovados++;
+      if (isReprovado(faseAtual)) reprovados++;
+      if (isPendente(faseAtual)) pendentes++;
+
+      total_defeitos += getDefeitosCount(rolo);
+      total_metros += getMetros(rolo);
+
+      if (isAprovado(faseAtual) || isReprovado(faseAtual)) {
+        const dataRegistro = rolo.DATA_REGISTRO || rolo.created_at || null;
+        if (dataRegistro) {
+          const dRegistro = new Date(dataRegistro);
+          if (!isNaN(dRegistro.getTime())) {
+            const diffDias = (data.getTime() - dRegistro.getTime()) / (1000 * 60 * 60 * 24);
+            if (diffDias >= 0) {
+              soma_tempo_dias += diffDias;
+              tempo_count++;
+            }
+          }
+        }
+      }
+    });
+
+    const total_decisoes = aprovados + reprovados;
+    const taxa_reprovacao = total_decisoes > 0
+      ? Math.round((reprovados / total_decisoes) * 1000) / 10
+      : 0;
+    const defeitos_100m = total_metros > 0
+      ? Math.round(((total_defeitos / total_metros) * 100) * 100) / 100
+      : 0;
+    const pendencias_pct = total_periodo > 0
+      ? Math.round((pendentes / total_periodo) * 1000) / 10
+      : 0;
+    const tempo_medio_dias = tempo_count > 0
+      ? Math.round((soma_tempo_dias / tempo_count) * 10) / 10
+      : 0;
+
+    Logger.log('[APP] ✅ [KPI] Periodo total: ' + total_periodo);
+    Logger.log('[APP] ❌ [KPI] Reprovacao: ' + taxa_reprovacao + '%');
+    Logger.log('[APP] ⚠️ [KPI] Defeitos/100m: ' + defeitos_100m);
+    Logger.log('[APP] ⏳ [KPI] Pendencias: ' + pendencias_pct + '%');
+    Logger.log('[APP] ⏱️ [KPI] Tempo medio: ' + tempo_medio_dias + 'd');
+    
+    // 5️⃣ RETORNAR DADOS ESTRUTURADOS
+    const resultado = {
+      status: 'sucesso',
+      timestamp: dataAtual,
+      kpi: {
+        reprovacao: taxa_reprovacao,
+        defeitos_100m: defeitos_100m,
+        pendencias_pct: pendencias_pct,
+        tempo_medio_dias: tempo_medio_dias,
+        total_periodo: total_periodo,
+        aprovados_periodo: aprovados,
+        reprovados_periodo: reprovados,
+        pendentes_periodo: pendentes
+      }
+    };
+    
+    Logger.log('[APP] 📊 [KPI] Resultado final: ' + JSON.stringify(resultado));
+    return resultado;
+    
+  } catch (error) {
+    Logger.log('[APP] ❌ [KPI] Erro geral: ' + error.message);
+    Logger.log('[APP] STACK: ' + error.stack);
+    
+    return {
+      status: 'erro',
+      mensagem: error.message,
+      kpi: {
+        reprovacao: 0,
+        defeitos_100m: 0,
+        pendencias_pct: 0,
+        tempo_medio_dias: 0,
+        total_periodo: 0,
+        aprovados_periodo: 0,
+        reprovados_periodo: 0,
+        pendentes_periodo: 0
+      }
+    };
+  }
+}

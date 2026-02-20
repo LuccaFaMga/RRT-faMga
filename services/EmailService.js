@@ -1,0 +1,304 @@
+/*******************************************************************
+ * RRT_EmailService_v6 — SERVIÇO PREMIUM DE E-MAILS (OTIMIZADO)
+ * Compatível com:
+ * ✔ MainApp v1
+ * ✔ SupervisorController v2.1
+ * ✔ DocumentService v4/v5 (com novo retorno de ID)
+ * ✔ Firestore v2
+ *******************************************************************/
+
+/* ============================================================
+    🧩 UTIL — QR CODE
+   ============================================================ */
+/**
+ * Gera URL para QR Code de um link.
+ * @param {string} url
+ * @param {number} size
+ * @returns {string} URL do QR Code
+ */
+function _qrCode(url, size) {
+    if (!url) return "";
+    size = size || 220;
+
+    return (
+        "https://api.qrserver.com/v1/create-qr-code/?" +
+        "size=" + size + "x" + size +
+        "&data=" + encodeURIComponent(url)
+    );
+}
+
+/* ============================================================
+    🎨 TEMPLATE UNIVERSAL — EMAIL PREMIUM
+   ============================================================ */
+/**
+ * Template HTML premium para emails de notificação.
+ */
+function _emailTemplate({ title, subtitle, idRolo, status, color, body, qr }) {
+    const logo = `https://drive.google.com/uc?id=${CONFIG.IDS.LOGO_FILE}`;
+
+    return `
+    <div style="font-family:Arial,Helvetica,sans-serif;
+                max-width:650px;margin:auto;
+                border:1px solid #ddd;border-radius:12px;overflow:hidden;
+                box-shadow:0 4px 10px rgba(0,0,0,0.1);">
+
+        <div style="background:${color};padding:25px 20px;color:white;text-align:center;">
+            <img src="${logo}" style="height:60px;margin-bottom:8px">
+            <h2 style="margin:0;font-size:24px;">${title}</h2>
+            <p style="margin-top:6px;font-size:14px;opacity:.85;">${subtitle}</p>
+        </div>
+
+        <div style="padding:16px;text-align:center;">
+            <span style="
+                padding:8px 20px;background:${color};
+                border-radius:25px;color:white;
+                font-weight:bold;text-transform:uppercase;
+                font-size:13px;letter-spacing:1px;">
+                ${status}
+            </span>
+        </div>
+
+        <div style="display:flex;justify-content:space-between;
+                    padding:20px;align-items:center;flex-wrap:wrap;">
+            <div style="font-size:15px;color:#333;min-width:240px;">
+                <p><b>ID do Rolo:</b> ${idRolo}</p>
+                <p><b>Data:</b> ${Utilities.formatDate(
+                    new Date(),
+                    Session.getScriptTimeZone(),
+                    "dd/MM/yyyy HH:mm"
+                )}</p>
+            </div>
+
+            ${
+              qr
+                ? `<div style="text-align:center;">
+                    <img src="${qr}" style="width:130px;height:130px;border:1px solid #ddd;border-radius:8px;">
+                   </div>`
+                : ""
+            }
+        </div>
+
+        <div style="padding:22px;color:#333;font-size:15px;line-height:1.55;">
+            ${body}
+        </div>
+
+        <hr style="border:none;border-top:1px solid #eee;margin:0">
+
+        <div style="padding:15px;text-align:center;font-size:12px;color:#666;">
+            Sistema Digital de Revisão — FA Maringá<br>
+            <b>FA Maringá</b><br>
+            <span style="color:#aaa;">Mensagem automática — não responder</span>
+        </div>
+    </div>`;
+}
+
+/* ============================================================
+   🔺 1️⃣ EMAIL → SUPERVISOR (APÓS REVISOR)
+   ============================================================ */
+function sendRevisaoConcluidaEmail(mainData, pdfBlob) {
+    const fn = "sendRevisaoConcluidaEmail_v7";
+
+    try {
+        const id = mainData.id_do_rolo;
+        const to = CONFIG.EMAIL.SUPERVISOR;
+        if (!to) throw new Error("Email do Supervisor não configurado.");
+
+        // Links corretos usando MainApp.buildSupervisorApprovalLink
+        const linkA = buildSupervisorApprovalLink(id, "APROVADO", 60); // Aprovar
+        const linkR = buildSupervisorApprovalLink(id, "REPROVADO", 60); // Reprovar
+
+        // Defeitos
+        const defects = mainData.defects || [];
+        let defeitosHtml = `<table style="width:100%; border-collapse: collapse; margin-top: 15px; font-size:14px;">
+                <tr>
+                    <th style="border:1px solid #ddd; padding:8px; background:#f8f8f8;">Tipo</th>
+                    <th style="border:1px solid #ddd; padding:8px; background:#f8f8f8;">Metragem</th>
+                    <th style="border:1px solid #ddd; padding:8px; background:#f8f8f8;">Gravidade</th>
+                </tr>`;
+        if (!defects.length) {
+            defeitosHtml += '<tr><td colspan="3" style="border:1px solid #ddd; padding:8px;">Sem defeitos reprovativos.</td></tr>';
+        } else {
+            defects.slice(0,5).forEach(d => {
+                const gravidadeStyle = d.gravidade === "CRÍTICA" ? "color:#dc3545;font-weight:bold;" : "";
+                defeitosHtml += `<tr>
+                    <td style="border:1px solid #ddd; padding:8px;">${d.tipo}</td>
+                    <td style="border:1px solid #ddd; padding:8px;">${d.metro_inicial || d.metroInicial}m - ${d.metro_final || d.metroFinal}m</td>
+                    <td style="border:1px solid #ddd; padding:8px; ${gravidadeStyle}">${d.gravidade || "N/A"}</td>
+                </tr>`;
+            });
+            if (defects.length > 5) {
+                defeitosHtml += '<tr><td colspan="3" style="border:1px solid #ddd; padding:8px; text-align:center; color:#666;">Mais defeitos listados no Relatório Técnico.</td></tr>';
+            }
+        }
+        defeitosHtml += "</table>";
+
+        const body = `
+            <p>Um novo rolo foi revisado e está <b>aguardando decisão do supervisor</b>.</p>
+            <h3>Resumo de Defeitos</h3>
+            ${defeitosHtml}
+            <hr style="border:none;border-top:1px solid #eee;margin:15px 0;">
+            <div style="text-align:center;">
+                <a href="${linkA}" style="background:#28a745;color:white;padding:12px 20px;border-radius:6px;text-decoration:none;font-weight:bold;display:inline-block;margin-right:15px;">
+                    ✔ APROVAR
+                </a>
+                <a href="${linkR}" style="background:#dc3545;color:white;padding:12px 20px;border-radius:6px;text-decoration:none;font-weight:bold;display:inline-block;">
+                    ❌ REPROVAR
+                </a>
+            </div>
+        `;
+
+        const html = _emailTemplate({
+            title: "NOVO ROLO REVISADO",
+            subtitle: "Supervisor deve tomar uma decisão",
+            idRolo: id,
+            status: "AGUARDANDO SUPERVISOR",
+            color: "#ff9800",
+            body,
+            qr: _qrCode(linkA)
+        });
+
+        const attachments = pdfBlob ? [pdfBlob.setName(`RRT_Relatorio_${id}.pdf`)] : [];
+
+        MailApp.sendEmail({
+            to,
+            subject: `🔴 AÇÃO NECESSÁRIA: RRT ${id} aguardando decisão do supervisor`,
+            htmlBody: html,
+            attachments,
+            name: CONFIG.EMAIL.SENDER_NAME
+        });
+
+        LogApp.log(`[${fn}] Email enviado ao supervisor.`, LogApp.LEVELS.INFO);
+        return true;
+
+    } catch (err) {
+        LogApp.log(`[${fn}] ERRO: ${err.stack}`, LogApp.LEVELS.ERROR);
+        return false;
+    }
+}
+
+/* ============================================================
+   🔺 2️⃣ EMAIL → SUPERVISOR APROVOU
+   ============================================================ */
+function sendSupervisorApprovalEmail(updated) {
+    const fn = "sendSupervisorApprovalEmail_v7";
+
+    try {
+        const id = updated.id_do_rolo;
+        const to = CONFIG.EMAIL.SUPERVISOR;
+        if (!to) throw new Error("Email do Supervisor não configurado.");
+
+        const defects = updated.defeitos || [];
+        let defeitosHtml = "<ul>";
+        if (!defects.length) defeitosHtml += "<li>Sem defeitos registrados.</li>";
+        else defects.forEach(d => {
+            defeitosHtml += `<li><b>${d.tipo}</b> — ${d.metro_inicial || d.metroInicial}m → ${d.metro_final || d.metroFinal}m</li>`;
+        });
+        defeitosHtml += "</ul>";
+
+        const body = `
+            <p>O rolo <b>${id}</b> foi <span style="color:#28a745;"><b>APROVADO</b></span> pelo supervisor.</p>
+            <h3>Defeitos Registrados</h3>
+            ${defeitosHtml}
+        `;
+
+        const html = _emailTemplate({
+            title: "ROLO APROVADO",
+            subtitle: "Supervisor aprovou o rolo",
+            idRolo: id,
+            status: "APROVADO",
+            color: "#28a745",
+            body,
+            qr: ""
+        });
+
+        MailApp.sendEmail({
+            to,
+            subject: `RRT — Rolo ${id} APROVADO`,
+            htmlBody: html,
+            name: CONFIG.EMAIL.SENDER_NAME
+        });
+
+        LogApp.log(`[${fn}] Email enviado (Aprovado).`, LogApp.LEVELS.INFO);
+        return true;
+
+    } catch (err) {
+        LogApp.log(`[${fn}] ERRO: ${err}`, LogApp.LEVELS.ERROR);
+        return false;
+    }
+}
+
+/* ============================================================
+   🔺 3️⃣ EMAIL → COMPRAS (GARANTIA)
+   ============================================================ */
+function sendComprasEmail(mainData, defects, docs) {
+    const fn = "sendComprasEmail_v7";
+
+    try {
+        const to = CONFIG.EMAIL.COMPRAS;
+        const id = mainData.id_do_rolo;
+        if (!to) throw new Error("Email de Compras não configurado.");
+
+        LogApp.log(`[${fn}] Enviando email para Compras: ${to} (rolo ${id}).`, LogApp.LEVELS.INFO);
+
+        let relatorioFile = null, relUrl = "";
+        if (docs?.relatorioFileId) {
+            try {
+                relatorioFile = DriveApp.getFileById(docs.relatorioFileId);
+                relUrl = relatorioFile.getUrl();
+            } catch (e) { LogApp.log(`[${fn}] Falha ao buscar PDF: ${e.message}`, LogApp.LEVELS.WARN); }
+        }
+
+        const linkAcompanhamento = `${CONFIG.URL.GARANTIA_APP}?page=compras&id=${encodeURIComponent(id)}`;
+
+        let defeitosHtml = "<ul>";
+        if (!defects?.length) defeitosHtml += "<li>Nenhum defeito de alto impacto registrado.</li>";
+        else defects.forEach(d => {
+            defeitosHtml += `<li><b>${d.tipo}</b> — ${d.metro_inicial || d.metroInicial}m → ${d.metro_final || d.metroFinal}m (${d.gravidade || "N/A"})</li>`;
+        });
+        defeitosHtml += "</ul>";
+
+        const body = `
+            <p>O rolo <b>${id}</b> foi <b style="color:#dc3545;">REPROVADO</b> pelo Supervisor. Solicitação de GARANTIA/DEVOLUÇÃO necessária.</p>
+            <h3>Defeitos</h3>
+            ${defeitosHtml}
+            <div style="text-align:center; margin-top:15px;">
+                <a href="${linkAcompanhamento}" style="background:#3498db;color:white;padding:14px 25px;border-radius:6px;text-decoration:none;font-weight:bold;font-size:16px;">
+                    Acompanhar Status da Garantia
+                </a>
+            </div>
+        `;
+
+        const html = _emailTemplate({
+            title: "ROLO REPROVADO - AÇÃO GARANTIA",
+            subtitle: "Notificação para Solicitação de Devolução/Garantia",
+            idRolo: id,
+            status: "AGUARDANDO GARANTIA",
+            color: "#3498db",
+            body,
+            qr: relUrl ? _qrCode(relUrl) : _qrCode(linkAcompanhamento)
+        });
+
+        const attachments = relatorioFile ? [relatorioFile.getBlob()] : [];
+
+        MailApp.sendEmail({
+            to,
+            subject: `🚨 GARANTIA: Rolo Reprovado (${id}) exige abertura de processo`,
+            htmlBody: html,
+            attachments
+        });
+
+        LogApp.log(`[${fn}] Email enviado para Compras (Garantia).`, LogApp.LEVELS.INFO);
+        return true;
+
+    } catch (err) {
+        LogApp.log(`[${fn}] ERRO: ${err}`, LogApp.LEVELS.ERROR);
+        return false;
+    }
+}
+
+/* ============================================================
+    EXPORTAÇÃO GLOBAL
+   ============================================================ */
+var sendRevisaoConcluidaEmail = sendRevisaoConcluidaEmail;
+var sendSupervisorApprovalEmail = sendSupervisorApprovalEmail;
+var sendComprasEmail = sendComprasEmail;
