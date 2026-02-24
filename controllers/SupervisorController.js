@@ -212,7 +212,7 @@ var SupervisorController = (function () {
         if (faseFinal === "enviado_compras" && typeof sendComprasEmail === "function") {
           _track(id, "EMAIL_COMPRAS_ATTEMPT");
           const linkAcompanhamento =
-            (typeof CONFIG !== 'undefined' && CONFIG.URL.GARANTIA_APP)
+            (typeof CONFIG !== 'undefined' && CONFIG.URL?.GARANTIA_APP)
               ? `${CONFIG.URL.GARANTIA_APP}?action=garantia&idRolo=${encodeURIComponent(id)}`
               : null;
 

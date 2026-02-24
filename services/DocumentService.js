@@ -11,31 +11,30 @@ const BLOCK_SIZE_2D = 2;
 /* ============================================================
  * 📁 DRIVE — PASTAS
  * ============================================================ */
-function getOrCreateRollFolderSimple(rollId) {
-  if (!rollId) throw new Error("ID do rolo inválido.");
-  // 🛡️ Uso de Optional Chaining para evitar o erro 'CONFIG is undefined'
-  const rootId = CONFIG?.IDS?.PASTA_RRT || CONFIG?.IDS?.OUTPUT_FOLDER;
-  const root = rootId ? DriveApp.getFolderById(rootId) : DriveApp.getRootFolder();
-  const it = root.getFoldersByName(String(rollId));
-  return it.hasNext() ? it.next() : root.createFolder(String(rollId));
-}
+// getOrCreateRollFolderSimple() — INLINED into getOrCreateRollFolder (simpler logic)
 
 function getOrCreateRollFolder(id) {
-  const roll = getOrCreateRollFolderSimple(id);
-  return {
-    roll,
-    relatorio: ensureSubfolder(roll, "RELATORIO"),
-    fotos: ensureSubfolder(roll, "FOTOS")
-  };
+  if (!id) throw new Error("ID do rolo inválido.");
+  
+  // 🛡️ Usar Optional Chaining para evitar erro 'CONFIG is undefined'
+  const rootId = CONFIG?.IDS?.PASTA_RRT || CONFIG?.IDS?.OUTPUT_FOLDER;
+  const root = rootId ? DriveApp.getFolderById(rootId) : DriveApp.getRootFolder();
+  const it = root.getFoldersByName(String(id));
+  const roll = it.hasNext() ? it.next() : root.createFolder(String(id));
+  
+  return {
+    roll,
+    relatorio: ensureSubfolder(roll, "RELATORIO"),
+    fotos: ensureSubfolder(roll, "FOTOS")  };
 }
 
 function ensureSubfolder(parent, name) {
-  const it = parent.getFoldersByName(name);
-  return it.hasNext() ? it.next() : parent.createFolder(name);
+  const it = parent.getFoldersByName(name);
+  return it.hasNext() ? it.next() : parent.createFolder(name);
 }
+
 /* ============================================================
- * ⚙️ ASYNC API — AGENDAMENTO
- * ============================================================ */
+ * ⚙️ ASYNC API — AGENDAMENTO * ============================================================ */
 function generateAllDocsAsync(mainData, defects, photoIds, reportType, links = {}) {
   const id = mainData?.id_do_rolo;
   if (!id) throw new Error("ID do rolo ausente.");

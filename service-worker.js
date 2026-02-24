@@ -30,22 +30,92 @@ if (typeof self === 'undefined' || !('caches' in self)) {
 // SERVICE WORKER INITIALIZATION (Browser context only)
 // ========================================================= //
 
-const CACHE_VERSION = 'fa-rrt-v1.0.0';
-const CACHE_ASSETS = `${CACHE_VERSION}-assets`;
-const CACHE_DYNAMIC = `${CACHE_VERSION}-dynamic`;
+// 🚀 OTIMIZAÇÃO SPRINT 3 (4/4): Estratégia de cache melhorada
+const CACHE_VERSION = 'fa-rrt-v3.0.0-optimized';
+const CACHE_ASSETS = `${CACHE_VERSION}-assets`;        // Recursos estáticos (CSS, fonts)
+const CACHE_DYNAMIC = `${CACHE_VERSION}-dynamic`;      // Dados dinâmicos (API responses)
+const CACHE_IMAGES = `${CACHE_VERSION}-images`;        // Imagens (fotos)
+const MAX_CACHE_ITEMS = 100;                            // Limite de itens em cache
 const DB_NAME = 'fa-rrt-db';
 const STORE_QUEUE = 'sync-queue';
 const STORE_REVIEWS = 'offline-reviews';
 
-// Arquivos essenciais para offline
+// ✅ Arquivos essenciais para offline (sem Chart.js que agora é lazy-loaded)
 const ESSENTIAL_ASSETS = [
   '/index.html',
   '/ui/reviewer.html',
   '/ui/estoque.html',
   '/ui/index.html',
-  'https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap',
-  'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css'
+  'https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap'
+  // ⚡ OTIMIZAÇÃO: Font Awesome não carregado no install (lazy ou on-demand)
 ];
+
+// ==================== CACHE HELPERS ====================
+/**
+ * 🚀 OTIMIZAÇÃO: Cleanup automático LRU (Least Recently Used)
+ * Mantém cache <= 100 items, remove itens antigos
+ */
+async function cleanupCache(cacheName, maxItems = MAX_CACHE_ITEMS) {
+  const cache = await caches.open(cacheName);
+  const keys = await cache.keys();
+  
+  if (keys.length > maxItems) {
+    const keysToDelete = keys.slice(0, keys.length - maxItems);
+    for (const key of keysToDelete) {
+      await cache.delete(key);
+    }
+    console.log(`[SW] 🗑️  Limpeza LRU: removidas ${keysToDelete.length} URLs antigas de ${cacheName}`);
+  }
+}
+
+/**
+ * 🔄 Cache-First Strategy: Serve from cache if available, else network
+ */
+async function cacheFirst(request) {
+  const cache = await caches.open(CACHE_ASSETS);
+  const cached = await cache.match(request);
+  
+  if (cached) {
+    return cached;
+  }
+  
+  try {
+    const response = await fetch(request);
+    if (response.status === 200) {
+      const clonedResponse = response.clone();
+      cache.put(request, clonedResponse);
+      cleanupCache(CACHE_ASSETS); // LRU cleanup
+    }
+    return response;
+  } catch (err) {
+    console.warn('[SW] ⚠️  Falha em cacheFirst para:', request.url);
+    throw err;
+  }
+}
+
+/**
+ * 🌐 Network-First Strategy: Try network first, fallback to cache
+ */
+async function networkFirst(request) {
+  const dynamicCache = await caches.open(CACHE_DYNAMIC);
+  
+  try {
+    const response = await fetch(request);
+    if (response.status === 200) {
+      const clonedResponse = response.clone();
+      dynamicCache.put(request, clonedResponse);
+      cleanupCache(CACHE_DYNAMIC); // LRU cleanup
+    }
+    return response;
+  } catch (err) {
+    const cached = await dynamicCache.match(request);
+    if (cached) {
+      console.log('[SW] 📦 Using cached response (network failed):', request.url);
+      return cached;
+    }
+    throw err;
+  }
+}
 
 // ==================== EVENT: INSTALL ====================
 self.addEventListener('install', event => {
@@ -118,52 +188,6 @@ self.addEventListener('fetch', event => {
   event.respondWith(networkFirst(request));
 });
 
-// ==================== ESTRATÉGIA: CACHE FIRST ====================
-function cacheFirst(request) {
-  return caches.match(request)
-    .then(response => response || fetch(request)
-      .then(response => {
-        // Não cachear respostas que não são OK
-        if (!response || response.status !== 200 || response.type !== 'basic') {
-          return response;
-        }
-        
-        // Clonar resposta
-        const responseToCache = response.clone();
-        
-        caches.open(CACHE_ASSETS)
-          .then(cache => cache.put(request, responseToCache));
-        
-        return response;
-      })
-      .catch(() => {
-        // Se offline e não tem cache, retornar página offline
-        if (request.mode === 'navigate') {
-          return caches.match('/offline.html');
-        }
-        return null;
-      })
-    );
-}
-
-// ==================== ESTRATÉGIA: NETWORK FIRST ====================
-function networkFirst(request) {
-  return fetch(request)
-    .then(response => {
-      // Armazenar em cache para offline
-      if (response && response.status === 200) {
-        const responseToCache = response.clone();
-        caches.open(CACHE_DYNAMIC)
-          .then(cache => cache.put(request, responseToCache));
-      }
-      return response;
-    })
-    .catch(() => {
-      // Fallback para cache se offline
-      return caches.match(request)
-        .then(response => response || createOfflineResponse());
-    });
-}
 
 // ==================== RESPONSE OFFLINE ====================
 function createOfflineResponse() {

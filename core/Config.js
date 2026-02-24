@@ -24,6 +24,8 @@ const CONFIG_VALUES = {
     URL: {
         SUPERVISOR_APP:
             "https://script.google.com/macros/s/AKfycbxuml0qIiuRVDJKMxk0RnwgfWytor6Dz7aJ9c56Yze2sAiiHGOkjqo1MmaQJ_Fy4NG5/exec",
+        // NOTA: GARANTIA_APP é opcional — EmailService.js usa SUPERVISOR_APP como fallback
+        // Se precisar de URL separada para Compras, adicionar aqui
         APPROVAL_FORM_BASE:
             "https://docs.google.com/forms/d/e/1FAIpQLScZZX.../viewform?usp=pp_url"
     },

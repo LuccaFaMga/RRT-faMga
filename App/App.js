@@ -32,15 +32,8 @@ function buildSupervisorApprovalLink(idRolo, decision, expiresMinutes) {
     return `${base}?page=supervisor&action=decide&data=${encodeURIComponent(payload)}&sig=${encodeURIComponent(signature)}`;
 }
 
-function normalizeKeysToSnakeCase(obj) {
-    if (!obj || typeof obj !== "object" || Array.isArray(obj)) return obj;
-    return Object.fromEntries(
-        Object.entries(obj).map(([k, v]) => [
-            k.replace(/([A-Z])/g, "_$1").toLowerCase(),
-            v
-        ])
-    );
-}
+// ✅ REMOVED: normalizeKeysToSnakeCase() — Use KeyNormalizer.normalizeKeysToSnakeCase() instead
+// The complete recursive version is in core/KeyNormalizer.js
 
 function sanitizeFilename(name) {
     return String(name || "").replace(/[^\w.\-]+/g, "_").substring(0, 80);
@@ -597,6 +590,19 @@ function processarRRT_Web(rawMainData) {
   }
 }
 
+/**
+ * 🔄 CANONIZAÇÃO NÍVEL 3: normalizeMainData()
+ * ================================================
+ * Converte dados formulário para campos canônicos com fallbacks.
+ * Pipeline:
+ * 1) normalizeKeysToSnakeCase() - camelCase → snake_case
+ * 2) mapMetersAndWidth() - converte unidades (wid, len)
+ * 3) Resolve metros_revisado com fallback para metros_fornecedor
+ * 4) Timestamps com história (criado_em, atualizado_em)
+ * 5) Arrays (defeitos, fotos) normalizadas
+ * 
+ * Resultado: {metros_revisado, tipo_tecido, timestamps, defeitos[], fotos[]}
+ */
 function normalizeMainData(raw, previous, ts) {
   const data = normalizeKeysToSnakeCase(raw);
 
@@ -772,6 +778,18 @@ function buildPhotosRecords(data, defects, revisionId, ts) {
 }
 
 
+/**
+ * 🔄 CANONIZAÇÃO NÍVEL 1: buildStructuredPayload()
+ * ================================================
+ * Mapeia dados brutos para schema estruturado canônico.
+ * - IDs: Tenta fallback chain (review_id || revision_id)
+ * - Supplier: fallback para supplier_nm, supplier_name, fornecedor
+ * - Produto: fallback para product_id, produto_id, roll_id
+ * - Dimensões: len→largura_cm, wid→metros_fornecedor
+ * - Tipo Tecido: determina se cálculos usam M2 ou KG
+ * 
+ * Resultado: Garantir entrada para persistStructuredData()
+ */
 function buildStructuredPayload(rolo, defeitos, fotos) {
   // ✅ CRÍTICO: Mapear TODOS os campos obrigatórios para novo schema
   return {
@@ -849,6 +867,18 @@ function transitionRoll(payload) {
     }
 }
 
+/**
+ * 🔄 CANONIZAÇÃO NÍVEL 2: normalizeQrPayload()
+ * ================================================
+ * Normaliza dados do QR code/escannings para campos padrão.
+ * - Supplier: supplier_name || supplier_nm (entrada)
+ * - Produto: product_id (entrada)
+ * - Largura: len (entrada em cm)
+ * - Metragem: meters_supplier || wid (entrada)
+ * - Estrutura: est_tc usado para diferenciar PLANO vs MALHA
+ * 
+ * Resultado: {supplier_id, supplier_nm, product_id, wid, len, ...}
+ */
 function normalizeQrPayload(qr) {
   if (!qr || typeof qr !== 'object') return {};
 
@@ -1048,12 +1078,7 @@ function parseQrCodeData(qrRaw) {
   };
 }
 
-function testeDebugServico() {
-  console.log("Tipo do DatabaseService:", typeof DatabaseService);
-  if (typeof DatabaseService !== "undefined") {
-    console.log("Métodos disponíveis:", Object.keys(DatabaseService));
-  }
-}
+// testeDebugServico() — DELETED (dead code, never called)
 
 /* ============================================================
  *   📦 FUNÇÕES DE ESTOQUE - INTEGRADAS COM CONTROLLERS

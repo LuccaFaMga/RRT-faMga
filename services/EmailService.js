@@ -249,6 +249,7 @@ function sendComprasEmail(mainData, defects, docs) {
         }
         if (!relUrl && docs?.pdfUrl) relUrl = String(docs.pdfUrl);
 
+                // ✅ GARANTIA_APP fallback: usa SUPERVISOR_APP se não configurada (intencional)
                 const garantiaBase =
                     CONFIG?.URL?.GARANTIA_APP ||
                     CONFIG?.URL?.SUPERVISOR_APP ||
