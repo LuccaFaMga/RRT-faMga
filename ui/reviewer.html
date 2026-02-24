@@ -3,6 +3,8 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
+<!-- ⚠️ CSP permissivo para Apps Script - permite CDNs externos -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' https: data: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://unpkg.com https://cdnjs.cloudflare.com; connect-src 'self' https:; img-src 'self' data: blob: https:;">
 <title>FA-RRT - REVISÃO DE TECIDOS</title>
 <link rel="icon" type="image/png" href="" />
 <!-- ✅ Design System Profissional - System Fonts Premium -->
@@ -1031,6 +1033,19 @@
       letter-spacing: -0.5px;
     }
 
+    .start-card-actions {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin-top: 8px;
+    }
+
+    .start-card-actions .btn,
+    #resp {
+      min-height: 52px;
+      font-size: 16px;
+    }
+
     /* Pré-preenchido (QR) Premium */
     .prefilled {
       background: rgba(16, 185, 129, 0.05) !important;
@@ -1072,6 +1087,13 @@
 
     /* Responsivo Premium */
     @media (max-width: 768px) {
+      .start-overlay {
+        align-items: flex-start;
+        justify-content: center;
+        padding: 16px 12px;
+        overflow-y: auto;
+      }
+
       .container {
         padding: 16px 12px;
       }
@@ -1120,8 +1142,9 @@
       }
       
       .start-card {
-        padding: 40px 24px;
-        max-width: 90%;
+        padding: 24px 18px;
+        max-width: 100%;
+        margin-top: 8px;
       }
       
       .toast {
@@ -1132,6 +1155,10 @@
     }
     
     @media (max-width: 480px) {
+      .start-overlay {
+        padding: 10px 8px;
+      }
+
       .container {
         padding: 12px 8px;
       }
@@ -1159,11 +1186,17 @@
       }
       
       .start-card {
-        padding: 32px 20px;
+        padding: 18px 14px;
       }
       
       .start-card h2 {
-        font-size: 24px;
+        font-size: 22px;
+      }
+
+      .start-card-actions .btn,
+      #resp {
+        min-height: 48px;
+        font-size: 15px;
       }
     }
     
@@ -1225,8 +1258,10 @@
         <option value="03">Mateus Camargo Pereira da Silva</option>
       </select>
 
-      <button id="btnScanQr" class="btn btn-primary" style="width:100%">📷 Scanear QR Code</button>
-      <button id="btnManualEntry" class="btn btn-ghost" style="width:100%;margin-top:10px">✍️ Preencher Manualmente</button>
+      <div class="start-card-actions">
+        <button id="btnScanQr" class="btn btn-primary" style="width:100%">📷 Scanear QR Code</button>
+        <button id="btnManualEntry" class="btn btn-ghost" style="width:100%">✍️ Preencher Manualmente</button>
+      </div>
 
       <small class="sub" style="margin-top:12px;display:block;">
         Use QR Code quando possível. Se houver dificuldade na leitura (composição muito longa, código danificado),
@@ -1573,6 +1608,11 @@ const ElementCache = {
 // 0. VARIÁVEIS GLOBAIS 
 // =========================================================================
 const DEBUG = false; // ✅ DESABILITAR console.log em produção
+
+if (!DEBUG) {
+  console.log = () => {};
+  console.debug = () => {};
+}
 
 const TIMER_STATE = {
   STOPPED: 'stopped',
@@ -2209,22 +2249,25 @@ const DefectManager = {
     _renderCache: new Map(),
     // ✅ OTIMIZADO: Um IntersectionObserver global ao invés de um por imagem
     _imageObserver: null,
+    // ✅ NOVO: Rastrear última contagem para evitar re-render desnecessário
+    _lastDefectCount: 0,
     
     initImageObserver() {
         if (this._imageObserver) return; // Evitar duplicata
         
         if ('IntersectionObserver' in window) {
+            // ✅ OTIMIZADO: threshold mínimo (1%) e rootMargin para preload suave
             this._imageObserver = new IntersectionObserver((entries) => {
                 entries.forEach(entry => {
                     if (entry.isIntersecting) {
                         const src = entry.target.dataset.src;
-                        if (src) {
+                        if (src && entry.target.src !== src) {
                             entry.target.src = src;
-                            this._imageObserver.unobserve(entry.target);
+                            this._imageObserver.unobserve(entry.target); // Parar de observar
                         }
                     }
                 });
-            }, { rootMargin: '50px' });
+            }, { threshold: 0.01, rootMargin: '50px' }); // 1% visible + 50px antecedência
         }
     },
     
@@ -2242,10 +2285,16 @@ const DefectManager = {
         }
     },
     
-    // Otimizado: render com throttling para evitar excesso de renders
+    // Otimizado: render com throttling MAIS conservador (100ms → 500ms para evitar excesso de renders)
     render: Utils.throttle(function() {
         const list = UI.getEl('defect-list'); 
         if (!list) return;
+        
+        // ✅ OTIMIZADO: Evitar re-render se número de defeitos não mudou
+        if (State.defects.length === this._lastDefectCount && this._renderCache.size > 0) {
+            return; // Nada mudou, pular re-render
+        }
+        this._lastDefectCount = State.defects.length;
         
         // ✅ Limpar cache se cresceu demais (LRU - evita memory leak)
         if (this._renderCache.size > CONFIG.MAX_RENDER_CACHE) {
@@ -2273,7 +2322,7 @@ const DefectManager = {
         
         list.innerHTML = '';
         list.appendChild(fragment);
-    }, 100),
+    }, 500), // ✅ OTIMIZADO: 100ms → 500ms (reduzir redraw de defeitos)
     
     _createDefectCard(d, idx) {
         const card = document.createElement('div');
@@ -2477,13 +2526,33 @@ const DefectManager = {
 },
 
     async uploadAllPhotos() {
-        const photos=State.defects.filter(d=>d.foto_base64 && d.foto_id!=='[PENDING]');
-        if(photos.length===0) return;
-        UI.showLoader(true); UI.showToast(`Enviando ${photos.length} fotos...`);
-        const results=await Promise.allSettled(photos.map((d,i)=>this.uploadPhoto(d.id,i,null)));
-        if(!UI._externalLoaderManaged) UI.showLoader(false); DefectManager.render();
-        const errors=results.filter(r=>r.status==='rejected');
-        if(errors.length>0){ const msg=errors.map(e=>e.reason?.message||'Erro desconhecido').join('; '); throw new Error(`Não foi possível enviar ${errors.length} fotos. ${msg}`); }
+      const photos = State.defects.filter(d => d.foto_base64 && d.foto_id !== '[PENDING]');
+      if (photos.length === 0) return;
+
+      UI.showLoader(true);
+      UI.showToast(`Enviando ${photos.length} fotos...`);
+
+      const errors = [];
+
+      for (let i = 0; i < photos.length; i++) {
+        const defect = photos[i];
+        try {
+          await this.uploadPhoto(defect.id, i, null);
+        } catch (error) {
+          errors.push(error);
+        }
+
+        UI.setProgress(20 + Math.round(((i + 1) / photos.length) * 30));
+        await new Promise(resolve => setTimeout(resolve, 0));
+      }
+
+      if (!UI._externalLoaderManaged) UI.showLoader(false);
+      DefectManager.render();
+
+      if (errors.length > 0) {
+        const msg = errors.map(e => e?.message || 'Erro desconhecido').join('; ');
+        throw new Error(`Não foi possível enviar ${errors.length} fotos. ${msg}`);
+      }
     },
 
     showEditModal(defect, index) {
@@ -2977,7 +3046,21 @@ function mapToCanonicalReview(raw) {
 // 9. FORM MANAGER
 // =========================================================================
 const FormManager = {
-    _setFormEnabled(enabled){ const form=UI.getEl('mainForm'); const submitBtn=UI.getEl('submitBtn'); if(!form) return; Array.from(form.elements).forEach(el=>{ if(el.tagName!=='BUTTON'||el.id==='btnClearForm'||el.id==='btnPreview'){ el.disabled=!enabled; } }); if(submitBtn){ submitBtn.disabled=!enabled; submitBtn.innerText=enabled?'Enviar RRT':'Processando...'; } },
+    _setFormEnabled(enabled) {
+      const root = UI.getEl('mainForm') || document;
+      const submitBtn = UI.getEl('submitBtn');
+
+      const controls = root.querySelectorAll('input, select, textarea, button');
+      controls.forEach(el => {
+        if (el.id === 'btnClearForm' || el.id === 'btnPreview') return;
+        el.disabled = !enabled;
+      });
+
+      if (submitBtn) {
+        submitBtn.disabled = !enabled;
+        submitBtn.innerText = enabled ? 'Enviar RRT' : 'Processando...';
+      }
+    },
 
     validateRequiredFields(){
       // ❗️Política: APENAS product_id (Código do Produto) bloqueia o envio.
@@ -3772,11 +3855,60 @@ const App = {
         qrInput = await scanQrFromCamera();
         console.log('[QR_SCAN] ✅ QR Code capturado via câmera');
       } catch (cameraError) {
-        console.warn('[QR_SCAN] ⚠️ Falha na câmera:', cameraError.message);
+        console.error('[QR_SCAN] 💥 ERRO DETALHADO NA CÂMERA:');
+        console.error('[QR_SCAN] Mensagem:', cameraError.message);
+        console.error('[QR_SCAN] Nome:', cameraError.name);
+        console.error('[QR_SCAN] Stack:', cameraError.stack);
+        console.error('[QR_SCAN] Causa:', cameraError.cause);
+        
+        // Diagnóstico detalhado
+        console.warn('[QR_SCAN] 🔍 DIAGNÓSTICO:');
+        console.warn('[QR_SCAN] - navigator.mediaDevices disponível?', !!navigator.mediaDevices);
+        console.warn('[QR_SCAN] - getUserMedia disponível?', !!navigator.mediaDevices?.getUserMedia);
+        console.warn('[QR_SCAN] - Ambiente Apps Script?', location.hostname.includes('script.google'));
+        console.warn('[QR_SCAN] - Online?', navigator.onLine);
+        console.warn('[QR_SCAN] - Permissões de câmera já concedidas?', 'desconhecido');
+        
         console.log('[QR_SCAN] 💡 Usando fallback para entrada manual');
         
+        // Mapear tipo de erro para mensagem amigável
+        let errorMsg = 'Câmera não disponível';
+        switch (cameraError.name) {
+          case 'NotAllowedError':
+          case 'PermissionDeniedError':
+            errorMsg = 'Você bloqueou o acesso à câmera. Permita em configurações do navegador.';
+            break;
+          case 'NotFoundError':
+          case 'DevicesNotFoundError':
+            errorMsg = 'Nenhuma câmera encontrada no dispositivo.';
+            break;
+          case 'NotReadableError':
+          case 'TrackStartError':
+            errorMsg = 'A câmera está em uso por outro aplicativo. Feche e tente novamente.';
+            break;
+          case 'OverconstrainedError':
+          case 'ConstraintNotSatisfiedError':
+            errorMsg = 'Câmera não atende aos requisitos técnicos mínimos.';
+            break;
+          case 'TypeError':
+            errorMsg = 'Navegador não suporta acesso à câmera.';
+            break;
+          default:
+            if (cameraError.message.includes('CDN') || cameraError.message.includes('CORS')) {
+              errorMsg = 'Falha ao carregar bibliotecas QR (CORS/CDN bloqueado).';
+            } else if (cameraError.message.includes('Timeout')) {
+              errorMsg = 'Timeout ao carregar scanner. Tente novamente.';
+            } else if (cameraError.message.includes('Cancelado')) {
+              errorMsg = 'Leitura de QR cancelada.';
+              console.log('[QR_SCAN] Usuário cancelou o scanner');
+              return;
+            }
+        }
+        
+        UI.showToast(`⚠️ ${errorMsg} Digite o código manualmente.`, '#f59e0b');
+        
         // Fallback: entrada manual
-        qrInput = prompt('Câmera não disponível. Digite o QR Code manualmente:');
+        qrInput = prompt('QR Code não pôde ser lido pela câmera.\n\nDigite o código manualmente:\n\n(Deixe em branco para cancelar)');
         
         if (!qrInput || qrInput.trim() === '') {
           console.log('[QR_SCAN] 🚫 Usuário cancelou ou não forneceu QR Code');
@@ -3787,21 +3919,18 @@ const App = {
 
       console.log('[QR_SCAN] 📝 QR Code recebido:', qrInput.substring(0, 50) + '...');
 
-      // Parse do QR Code
+      // Parse do QR Code (tolerante)
       const parsedQrData = this.parseQrPayload(qrInput);
-      
-      if (!parsedQrData) {
-        console.log('[QR_SCAN] ❌ Falha ao parsear QR Code');
-        UI.showToast('QR Code inválido ou mal formatado', '#ef4444');
-        return;
+      if (parsedQrData) {
+        console.log('[QR_SCAN] ✅ QR Code parseado com sucesso:', parsedQrData);
+      } else {
+        console.warn('[QR_SCAN] ⚠️ QR lido, mas sem mapeamento completo de campos. Seguindo com inicialização.');
       }
-
-      console.log('[QR_SCAN] ✅ QR Code parseado com sucesso:', parsedQrData);
 
       // Preparar dados para inicialização
       const payload = {
         revisorNome: selectedRevisor,
-        qrData: qrInput
+        qrData: parsedQrData || qrInput
       };
 
       console.log('[QR_SCAN] 🔄 Chamando initializeRRT com payload:', payload);
@@ -3809,10 +3938,14 @@ const App = {
       // Inicializar a revisão
       await this.initializeRRT(payload);
 
-      // ✅ AGORA: Preencher os campos do formulário com dados do QR
-      console.log('[QR_SCAN] 📝 Preenchendo campos do formulário...');
-      this.applyQrDataToForm(parsedQrData);
-      this.lockPrefilledFields();
+      // ✅ AGORA: Preencher campos apenas se payload for reconhecido
+      if (parsedQrData) {
+        console.log('[QR_SCAN] 📝 Preenchendo campos do formulário...');
+        this.applyQrDataToForm(parsedQrData);
+        this.lockPrefilledFields();
+      } else {
+        UI.showToast('QR lido. Complete os campos que não foram reconhecidos.', '#f59e0b');
+      }
       
       console.log('[QR_SCAN] 🎉 Fluxo de QR Code concluído com sucesso');
       
@@ -3834,22 +3967,116 @@ const App = {
   },
 
   parseQrPayload(raw){
-    const parts = String(raw||'').split(';').map(p=>p.trim());
-    if(parts.length < 12) return null;
+    const text = String(raw || '').replace(/[\u200B-\u200D\uFEFF]/g, '').trim();
+    if (!text) return null;
+
+    const numberFrom = (value) => {
+      const normalized = String(value || '')
+        .replace(/\s/g, '')
+        .replace(',', '.')
+        .replace(/[^0-9.-]/g, '');
+      const parsed = parseFloat(normalized);
+      return Number.isFinite(parsed) ? parsed : 0;
+    };
+
+    const buildCanonical = (payload = {}) => {
+      const data = {
+        supplier_id: payload.supplier_id || payload.fornecedor_id || payload.id_fornecedor || '',
+        supplier_name: payload.supplier_name || payload.supplier_nm || payload.fornecedor || payload.fornecedor_nome || '',
+        nf: payload.nf || payload.nota_fiscal || '',
+        product_id: payload.product_id || payload.produto_id || payload.codigo_produto || '',
+        lot: payload.lot || payload.lote || '',
+        sup_product_id: payload.sup_product_id || payload.produto_sup_id || payload.supplier_product_id || '',
+        color_id: payload.color_id || payload.cor || '',
+        fabric_pattern: payload.fabric_pattern || payload.padronagem || '',
+        loc: payload.loc || payload.localizacao || '',
+        meters_supplier: numberFrom(payload.meters_supplier ?? payload.metros_fornecedor ?? payload.wid),
+        wid: numberFrom(payload.wid ?? payload.len ?? payload.largura_cm),
+        comp: payload.comp || payload.composicao || ''
+      };
+
+      const hasMinimum = Object.values(data).some(v => String(v || '').trim() !== '' && String(v || '') !== '0');
+      return hasMinimum ? data : null;
+    };
+
+    // 1) JSON
+    if ((text.startsWith('{') && text.endsWith('}')) || (text.startsWith('[') && text.endsWith(']'))) {
+      try {
+        const parsedJson = JSON.parse(text);
+        if (Array.isArray(parsedJson) && parsedJson.length >= 11) {
+          const parts = parsedJson.map(v => String(v || '').trim());
+          return {
+            supplier_id: parts[0] || '',
+            supplier_name: parts[1] || '',
+            nf: parts[2] || '',
+            product_id: parts[3] || '',
+            lot: parts[4] || '',
+            sup_product_id: parts[5] || '',
+            color_id: parts[6] || '',
+            fabric_pattern: parts[7] || '',
+            loc: parts[8] || '',
+            meters_supplier: numberFrom(parts[9]),
+            wid: numberFrom(parts[10]),
+            comp: parts.slice(11).join(' ').trim()
+          };
+        }
+
+        const canonicalFromJson = buildCanonical(parsedJson || {});
+        if (canonicalFromJson) return canonicalFromJson;
+      } catch (e) {}
+    }
+
+    // 2) URL com query params
+    if (/^https?:\/\//i.test(text)) {
+      try {
+        const url = new URL(text);
+        const params = Object.fromEntries(url.searchParams.entries());
+        const canonicalFromUrl = buildCanonical(params);
+        if (canonicalFromUrl) return canonicalFromUrl;
+      } catch (e) {}
+    }
+
+    // 3) key=value / key:value em linhas
+    if (/[:=]/.test(text) && /\r?\n/.test(text)) {
+      const kv = {};
+      text.split(/\r?\n/).forEach(line => {
+        const trimmed = String(line || '').trim();
+        if (!trimmed) return;
+        const separatorIndex = trimmed.includes(':') ? trimmed.indexOf(':') : trimmed.indexOf('=');
+        if (separatorIndex <= 0) return;
+        const key = trimmed.slice(0, separatorIndex).trim().toLowerCase().replace(/\s+/g, '_');
+        const value = trimmed.slice(separatorIndex + 1).trim();
+        if (key) kv[key] = value;
+      });
+      const canonicalFromKv = buildCanonical(kv);
+      if (canonicalFromKv) return canonicalFromKv;
+    }
+
+    // 4) formato posicional legado
+    const bySemicolon = text.split(';').map(p => p.trim()).filter(Boolean);
+    const byPipe = text.split('|').map(p => p.trim()).filter(Boolean);
+    const byLine = text.split(/\r?\n/).map(p => p.trim()).filter(Boolean);
+
+    let parts = bySemicolon;
+    if (parts.length < 12 && byPipe.length >= 12) parts = byPipe;
+    if (parts.length < 12 && byLine.length >= 12) parts = byLine;
+    if (parts.length < 11) return null;
+
+    const comp = parts.slice(11).join(' ').trim();
 
     return {
-      supplier_id: parts[0],
-      supplier_name: parts[1],
-      nf: parts[2],
-      product_id: parts[3],
-      lot: parts[4],
-      sup_product_id: parts[5],
-      color_id: parts[6],
-      fabric_pattern: parts[7],
-      loc: parts[8],
-      meters_supplier: parseFloat(parts[9].replace(',','.')),
-      wid: parseFloat(parts[10].replace(',','.')),
-      comp: parts[11]
+      supplier_id: parts[0] || '',
+      supplier_name: parts[1] || '',
+      nf: parts[2] || '',
+      product_id: parts[3] || '',
+      lot: parts[4] || '',
+      sup_product_id: parts[5] || '',
+      color_id: parts[6] || '',
+      fabric_pattern: parts[7] || '',
+      loc: parts[8] || '',
+      meters_supplier: numberFrom(parts[9]),
+      wid: numberFrom(parts[10]),
+      comp: comp || ''
     };
   },
 
@@ -4019,7 +4246,7 @@ document.addEventListener('DOMContentLoaded', () => {
   if (typeof loadTheme === 'function') { loadTheme(); }
 
   // -----------------------------------------------------------------------
-  // 1. Garantir existência do <form id="mainForm">
+  // 1. Garantir referência principal sem clonar DOM (mais leve em mobile)
   // -----------------------------------------------------------------------
   if (!document.getElementById('mainForm')) {
     try {
@@ -4028,25 +4255,7 @@ document.addEventListener('DOMContentLoaded', () => {
         document.querySelector('.wrap');
 
       if (wrap) {
-        const form = document.createElement('form');
-        form.id = 'mainForm';
-        form.method = 'post';
-        form.className = wrap.className || '';
-
-        if (wrap.getAttribute('role')) {
-          form.setAttribute('role', wrap.getAttribute('role'));
-        }
-        if (wrap.getAttribute('aria-labelledby')) {
-          form.setAttribute(
-            'aria-labelledby',
-            wrap.getAttribute('aria-labelledby')
-          );
-        }
-
-        form.innerHTML = wrap.innerHTML;
-        wrap.parentNode.replaceChild(form, wrap);
-
-        console.log('[FORM] MAIN_FORM_CREATED | id=mainForm');
+        wrap.id = 'mainForm';
       }
     } catch (err) {
       console.error('[FORM] MAIN_FORM_CREATE_ERROR |', err);
@@ -4183,10 +4392,132 @@ function updateMeasureFieldsByFabricType() {
 // 11.6. QR CODE SCANNER COM CÂMERA (VERSÃO INDUSTRIAL)
 // =========================================================================
 
+const QR_TELEMETRY_SESSION_KEY = 'rrt_qr_scan_telemetry_v1';
+
+const QrTelemetrySession = {
+  _cache: null,
+
+  _blank() {
+    return {
+      totalScans: 0,
+      acceptedSources: Object.create(null),
+      jsqrAttempts: Object.create(null),
+      jsqrSuccess: Object.create(null),
+      zxingAttempts: Object.create(null),
+      zxingSuccess: Object.create(null),
+      nativeDetections: 0
+    };
+  },
+
+  _load() {
+    if (this._cache) return this._cache;
+    const fallback = this._blank();
+    try {
+      const raw = sessionStorage.getItem(QR_TELEMETRY_SESSION_KEY);
+      if (!raw) {
+        this._cache = fallback;
+        return this._cache;
+      }
+
+      const parsed = JSON.parse(raw);
+      this._cache = {
+        ...fallback,
+        ...(parsed || {}),
+        acceptedSources: Object.assign(Object.create(null), parsed?.acceptedSources || {}),
+        jsqrAttempts: Object.assign(Object.create(null), parsed?.jsqrAttempts || {}),
+        jsqrSuccess: Object.assign(Object.create(null), parsed?.jsqrSuccess || {}),
+        zxingAttempts: Object.assign(Object.create(null), parsed?.zxingAttempts || {}),
+        zxingSuccess: Object.assign(Object.create(null), parsed?.zxingSuccess || {})
+      };
+      return this._cache;
+    } catch (e) {
+      this._cache = fallback;
+      return this._cache;
+    }
+  },
+
+  _save() {
+    try {
+      sessionStorage.setItem(QR_TELEMETRY_SESSION_KEY, JSON.stringify(this._cache || this._blank()));
+    } catch (e) {
+      console.warn('[DEBUG_QR] ⚠️ Não foi possível salvar telemetria da sessão:', e?.message || e);
+    }
+  },
+
+  _mergeMap(target, source) {
+    Object.entries(source || {}).forEach(([key, value]) => {
+      target[key] = (target[key] || 0) + (Number(value) || 0);
+    });
+  },
+
+  recordScan(summary) {
+    const session = this._load();
+    session.totalScans += 1;
+    session.nativeDetections += Number(summary?.nativeDetections || 0);
+
+    const accepted = String(summary?.acceptedSource || 'unknown');
+    session.acceptedSources[accepted] = (session.acceptedSources[accepted] || 0) + 1;
+
+    this._mergeMap(session.jsqrAttempts, summary?.jsqrAttempts);
+    this._mergeMap(session.jsqrSuccess, summary?.jsqrSuccess);
+    this._mergeMap(session.zxingAttempts, summary?.zxingAttempts);
+    this._mergeMap(session.zxingSuccess, summary?.zxingSuccess);
+
+    this._save();
+    return session;
+  },
+
+  getTopStrategies(limit = 3) {
+    const session = this._load();
+    const all = [];
+
+    const pushRank = (engine, attemptsMap, successMap) => {
+      const keys = new Set([
+        ...Object.keys(attemptsMap || {}),
+        ...Object.keys(successMap || {})
+      ]);
+
+      keys.forEach((strategy) => {
+        const attempts = Number(attemptsMap?.[strategy] || 0);
+        const success = Number(successMap?.[strategy] || 0);
+        if (attempts <= 0 && success <= 0) return;
+        const rate = attempts > 0 ? (success / attempts) : 0;
+        all.push({ engine, strategy, attempts, success, rate });
+      });
+    };
+
+    pushRank('jsQR', session.jsqrAttempts, session.jsqrSuccess);
+    pushRank('ZXing', session.zxingAttempts, session.zxingSuccess);
+
+    return all
+      .sort((a, b) => {
+        if (b.success !== a.success) return b.success - a.success;
+        if (b.rate !== a.rate) return b.rate - a.rate;
+        return b.attempts - a.attempts;
+      })
+      .slice(0, Math.max(1, limit));
+  },
+
+  getMiniRankingText(limit = 3) {
+    const top = this.getTopStrategies(limit);
+    if (!top.length) return 'sem dados ainda';
+    return top
+      .map((item, idx) => `${idx + 1}) ${item.engine}:${item.strategy} ${item.success}/${item.attempts}`)
+      .join(' • ');
+  }
+};
+
 async function scanQrFromCamera() {
   console.log('[DEBUG_QR] 📷 scanQrFromCamera iniciado');
   
-  return new Promise((resolve, reject) => {
+  // Envolver em timeout para evitar travamentos
+  const timeoutPromise = new Promise((_, reject) => {
+    setTimeout(() => {
+      reject(new Error('Timeout ao escanear QR Code (120s). Tente novamente.'));
+    }, 120000); // 120 segundos timeout total
+  });
+  
+  const scanPromise = new Promise((resolve, reject) => {
 
     if (!navigator.mediaDevices?.getUserMedia) {
       console.error('[DEBUG_QR] ❌ getUserMedia não disponível');
@@ -4303,34 +4634,449 @@ async function scanQrFromCamera() {
       font-weight:600;
     `;
 
+    const scannerStateBadge = document.createElement('div');
+    scannerStateBadge.style.cssText = `
+      margin-top: 8px;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 12px;
+      border-radius: 9999px;
+      border: 1px solid rgba(255,255,255,0.25);
+      background: rgba(0,0,0,0.35);
+      color: #e2e8f0;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.2px;
+    `;
+    const scannerStateDot = document.createElement('span');
+    scannerStateDot.style.cssText = `
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #22c55e;
+      box-shadow: 0 0 0 0 rgba(34,197,94,0.4);
+      animation: pulse 1.6s infinite;
+    `;
+    const scannerStateText = document.createElement('span');
+    scannerStateText.textContent = 'Scanner ativo';
+    scannerStateBadge.appendChild(scannerStateDot);
+    scannerStateBadge.appendChild(scannerStateText);
+
+    // =========================
+    // INDICADOR SIMPLES E LIMPO
+    // =========================
+    const feedbackBox = document.createElement('div');
+    feedbackBox.style.cssText = `
+      margin-top:16px;
+      padding:16px 24px;
+      background:rgba(0,0,0,0.75);
+      border-radius:12px;
+      border:2px solid #ef4444;
+      min-width:320px;
+      text-align:center;
+      transition:all 0.3s ease;
+    `;
+
+    const feedbackIcon = document.createElement('div');
+    feedbackIcon.style.cssText = 'font-size:48px;margin-bottom:8px;';
+    feedbackIcon.textContent = '🔴';
+
+    const feedbackMessage = document.createElement('div');
+    feedbackMessage.style.cssText = 'font-size:18px;font-weight:700;color:#fff;margin-bottom:4px;';
+    feedbackMessage.textContent = 'Procurando QR Code...';
+
+    const feedbackHint = document.createElement('div');
+    feedbackHint.style.cssText = 'font-size:14px;color:#bbb;margin-top:8px;';
+    feedbackHint.textContent = 'Posicione a câmera sobre o código';
+
+    feedbackBox.appendChild(feedbackIcon);
+    feedbackBox.appendChild(feedbackMessage);
+    feedbackBox.appendChild(feedbackHint);
+
+    // =========================
+    // BARRA DE PROGRESSO
+    // =========================
+    const progressBar = document.createElement('div');
+    progressBar.style.cssText = `
+      margin-top: 16px;
+      width: 100%;
+      height: 6px;
+      background: rgba(255,255,255,0.1);
+      border-radius: 4px;
+      overflow: hidden;
+      max-width: 320px;
+      margin-left: auto;
+      margin-right: auto;
+    `;
+    
+    const progressFill = document.createElement('div');
+    progressFill.style.cssText = `
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, #3b82f6, #22c55e);
+      transition: width 0.1s linear;
+    `;
+    progressBar.appendChild(progressFill);
+
+    const updateFeedback = (stats) => {
+      // Atualizar barra de progresso
+      const searchTimeSeconds = Math.min((frameTick * 0.1), 10); // Max 10 segundos
+      const progressPercent = Math.min((searchTimeSeconds / 10) * 100, 85); // Max 85% sem escanear
+      progressFill.style.width = (stats.detected && stats.wellPositioned ? 100 : progressPercent) + '%';
+
+      if (!stats.detected) {
+        // Não detectado - vermelho
+        feedbackIcon.textContent = '🔍';
+        feedbackMessage.textContent = 'Procurando QR Code...';
+        feedbackMessage.style.color = '#fff';
+        feedbackHint.textContent = 'Aponte a câmera diretamente para o código';
+        feedbackBox.style.borderColor = '#ef4444';
+        feedbackBox.style.background = 'rgba(239,68,68,0.15)';
+      } else if (stats.wellPositioned) {
+        // Perfeito - verde
+        feedbackIcon.textContent = '✅';
+        feedbackMessage.textContent = 'QR Code Detectado!';
+        feedbackMessage.style.color = '#10b981';
+        feedbackHint.textContent = '✅ Lido com sucesso - processando...';
+        feedbackBox.style.borderColor = '#10b981';
+        feedbackBox.style.background = 'rgba(16,185,129,0.15)';
+        progressFill.style.width = '100%';
+      } else {
+        // Detectado mas precisa ajustar - amarelo
+        feedbackIcon.textContent = '⚠️';
+        feedbackMessage.textContent = 'QR Detectado!';
+        feedbackMessage.style.color = '#f59e0b';
+        
+        // Mensagem específica baseada no problema
+        if (stats.tooFar) {
+          feedbackHint.textContent = '📍 Aproxime mais a câmera';
+        } else if (stats.tooClose) {
+          feedbackHint.textContent = '📍 Afaste um pouco a câmera';
+        } else if (!stats.isStable) {
+          feedbackHint.textContent = '✋ Mantenha parada por 1 segundo';
+        } else {
+          feedbackHint.textContent = `⌛ Aguarde ${stats.timeRemaining}s...`;
+        }
+        
+        feedbackBox.style.borderColor = '#f59e0b';
+        feedbackBox.style.background = 'rgba(245,158,11,0.15)';
+      }
+    };
+
     // =========================
     // BOTÕES
     // =========================
     const buttons = document.createElement('div');
-    buttons.style.cssText = 'margin-top:16px;display:flex;gap:12px';
+    buttons.style.cssText = 'margin-top:16px;display:flex;gap:12px;justify-content:center;flex-wrap:wrap';
+
+    const captureBtn = document.createElement('button');
+    captureBtn.textContent = '📸 Capturar Foto Estática';
+    captureBtn.style.cssText = `
+      padding: 10px 16px;
+      border-radius: 8px;
+      border: none;
+      background: #3b82f6;
+      color: #fff;
+      font-weight: 600;
+      font-size: 14px;
+      cursor: pointer;
+      transition: all 0.2s;
+    `;
+    captureBtn.style.touchAction = 'manipulation';
+    captureBtn.onmouseover = () => captureBtn.style.background = '#2563eb';
+    captureBtn.onmouseout = () => captureBtn.style.background = '#3b82f6';
 
     const cancelBtn = document.createElement('button');
     cancelBtn.textContent = '❌ Cancelar';
-    cancelBtn.style.cssText = 'padding:10px 18px;border-radius:8px;border:none;background:#ef4444;color:#fff;font-weight:600';
+    cancelBtn.style.cssText = `
+      padding: 10px 16px;
+      border-radius: 8px;
+      border: none;
+      background: #ef4444;
+      color: #fff;
+      font-weight: 600;
+      font-size: 14px;
+      cursor: pointer;
+      transition: all 0.2s;
+    `;
+    cancelBtn.style.touchAction = 'manipulation';
+    cancelBtn.onmouseover = () => cancelBtn.style.background = '#dc2626';
+    cancelBtn.onmouseout = () => cancelBtn.style.background = '#ef4444';
 
+    buttons.appendChild(captureBtn);
     buttons.appendChild(cancelBtn);
 
-    modal.append(title, instructions, videoContainer, statusText, buttons);
+    modal.append(title, instructions, videoContainer, statusText, scannerStateBadge, feedbackBox, progressBar, buttons);
     document.body.appendChild(modal);
 
     let stream, interval, stableCount = 0;
+    let settled = false;
+    let lastCodeData = '';
+    let frameTick = 0;
+    let detector = null;
+    let detectorBusy = false;
+    let lastQRSize = 0;  // ✅ Novo: para detectar movimentos de câmera
+    let lastDetectionSource = 'unknown';
+    let lastAdaptiveContext = null;
+    let scanPaused = false;
+    let scanLoopBusy = false;
+    let lastDecodedData = '';
+    let decodedStableCount = 0;
+    const isIOSDevice = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+    const isAndroidDevice = /Android/i.test(navigator.userAgent);
+    const deviceMemory = Number(navigator.deviceMemory);
+    const lowEndByMemory = Number.isFinite(deviceMemory) ? (deviceMemory <= 3) : false;
+    let activeTrack = null;
+    let torchSupported = false;
+    let torchOn = false;
+    let scannerUiState = '';
+
+    function setScannerUiState(state, label) {
+      const nextState = `${state}:${label || ''}`;
+      if (nextState === scannerUiState) return;
+      scannerUiState = nextState;
+
+      scannerStateText.textContent = label || 'Scanner ativo';
+
+      if (state === 'busy') {
+        scannerStateDot.style.background = '#f59e0b';
+      } else if (state === 'capturing') {
+        scannerStateDot.style.background = '#3b82f6';
+      } else if (state === 'success') {
+        scannerStateDot.style.background = '#10b981';
+      } else if (state === 'error') {
+        scannerStateDot.style.background = '#ef4444';
+      } else {
+        scannerStateDot.style.background = '#22c55e';
+      }
+    }
+
+    const ScanTelemetry = {
+      jsqrAttempts: Object.create(null),
+      jsqrSuccess: Object.create(null),
+      zxingAttempts: Object.create(null),
+      zxingSuccess: Object.create(null),
+      nativeDetections: 0,
+      acceptedSource: '',
+
+      addAttempt(engine, key) {
+        if (!key) return;
+        const target = engine === 'zxing' ? this.zxingAttempts : this.jsqrAttempts;
+        target[key] = (target[key] || 0) + 1;
+      },
+
+      addSuccess(engine, key) {
+        if (!key) return;
+        const target = engine === 'zxing' ? this.zxingSuccess : this.jsqrSuccess;
+        target[key] = (target[key] || 0) + 1;
+      },
+
+      toSummary() {
+        return {
+          nativeDetections: this.nativeDetections,
+          acceptedSource: this.acceptedSource || 'none',
+          frameCount: frameTick,
+          jsqrAttempts: this.jsqrAttempts,
+          jsqrSuccess: this.jsqrSuccess,
+          zxingAttempts: this.zxingAttempts,
+          zxingSuccess: this.zxingSuccess
+        };
+      }
+    };
+
+    // Inicializar feedback após variáveis de estado e barra estarem prontas
+    updateFeedback({
+      detected: false,
+      wellPositioned: false,
+      tooFar: false,
+      tooClose: false,
+      isStable: false,
+      timeRemaining: 2
+    });
+    setScannerUiState('active', 'Scanner ativo');
 
     const cleanup = () => {
       if (interval) clearInterval(interval);
       if (stream) stream.getTracks().forEach(t => t.stop());
       modal.remove();
       style.remove();
+      if (ScanTelemetry.nativeDetections > 0 || Object.keys(ScanTelemetry.jsqrAttempts).length > 0 || Object.keys(ScanTelemetry.zxingAttempts).length > 0) {
+        console.warn('[DEBUG_QR] 📊 Telemetria de scan:', ScanTelemetry.toSummary());
+      }
     };
 
-    cancelBtn.onclick = () => {
+    const finishWithCode = (codeValue) => {
+      if (settled) return;
+      const normalized = String(codeValue || '').trim();
+      if (!normalized) return;
+      settled = true;
+      setScannerUiState('success', 'QR lido com sucesso');
+      if (!ScanTelemetry.acceptedSource) {
+        ScanTelemetry.acceptedSource = lastDetectionSource || 'unknown';
+      }
+
+      const summary = ScanTelemetry.toSummary();
+      QrTelemetrySession.recordScan(summary);
+      const miniRanking = QrTelemetrySession.getMiniRankingText(3);
+      if (typeof UI !== 'undefined' && UI.showToast) {
+        UI.showToast(`✅ QR lido • Top estratégias: ${miniRanking}`, '#2563eb');
+      }
+
+      cleanup();
+      resolve(normalized);
+    };
+
+    async function handleStaticCapture() {
+      if (!stream || video.readyState < video.HAVE_CURRENT_DATA) {
+        setScannerUiState('busy', 'Aguardando câmera');
+        UI.showToast('Câmera ainda não pronta. Aguarde...', '#f59e0b');
+        return;
+      }
+
+      if (scanLoopBusy) {
+        setScannerUiState('busy', 'Processando frame');
+        UI.showToast('Processando frame atual. Tente novamente em 1s.', '#f59e0b');
+        return;
+      }
+
+      console.log('[DEBUG_QR] 📸 Iniciando captura estática...');
+      scanPaused = true;
+      setScannerUiState('capturing', 'Capturando foto estática');
+      
+      statusText.textContent = '📸 Capturando foto... aguarde';
+      captureBtn.disabled = true;
+      cancelBtn.disabled = true;
+
+      try {
+        // Criar canvas de alta resolução (4× o frame normal)
+        const hires = document.createElement('canvas');
+        hires.width = video.videoWidth * 2;
+        hires.height = video.videoHeight * 2;
+        const ctx = hires.getContext('2d', { willReadFrequently: true });
+        ctx.imageSmoothingEnabled = false;
+        ctx.drawImage(video, 0, 0, hires.width, hires.height);
+
+        console.log('[DEBUG_QR] 📐 Canvas alta resolução:', hires.width, 'x', hires.height);
+
+        // Tentar ZXing primeiro (mais tolerante em foto estática)
+        let code = null;
+
+        if (typeof ZXing !== 'undefined' && ZXing.QRCodeReader) {
+          console.log('[DEBUG_QR] 🏭 Tentando ZXing em alta resolução...');
+          try {
+            const imageData = ctx.getImageData(0, 0, hires.width, hires.height);
+            const width = hires.width;
+            const height = hires.height;
+
+            // Aplicar equalizações agressivas para foto estática
+            const equalized = equalizeHistogram(imageData);
+            const aggressive = toAggressiveBinary(imageData);
+
+            const variants = [
+              { data: equalized, name: 'equalized-hires' },
+              { data: aggressive, name: 'aggressive-hires' },
+              { data: imageData.data, name: 'original-hires' }
+            ];
+
+            for (const variant of variants) {
+              try {
+                ScanTelemetry.addAttempt('zxing', `static-${variant.name}`);
+                const luminances = new Uint8ClampedArray(width * height);
+                for (let i = 0, j = 0; i < variant.data.length; i += 4, j++) {
+                  const r = variant.data[i];
+                  const g = variant.data[i + 1];
+                  const b = variant.data[i + 2];
+                  luminances[j] = Math.floor(0.299 * r + 0.587 * g + 0.114 * b);
+                }
+
+                const luminanceSource = new ZXing.RGBLuminanceSource(luminances, width, height);
+                const binaryBitmap = new ZXing.BinaryBitmap(new ZXing.HybridBinarizer(luminanceSource));
+                const reader = new ZXing.QRCodeReader();
+                const result = reader.decode(binaryBitmap);
+
+                if (result?.text) {
+                  ScanTelemetry.addSuccess('zxing', `static-${variant.name}`);
+                  lastDetectionSource = `static:zxing:${variant.name}`;
+                  console.log('[DEBUG_QR] ✅ ZXing hires leu:', result.text.substring(0, 30) + '...');
+                  code = result.text;
+                  break;
+                }
+              } catch (e) {}
+            }
+          } catch (zxingErr) {
+            console.warn('[DEBUG_QR] ZXing hires falhou:', zxingErr?.message);
+          }
+        }
+
+        // Fallback: jsQR em alta resolução
+        if (!code && typeof jsQR !== 'undefined') {
+          console.log('[DEBUG_QR] 📷 Tentando jsQR em alta resolução...');
+          const imageData = ctx.getImageData(0, 0, hires.width, hires.height);
+          ScanTelemetry.addAttempt('jsqr', 'static-original-hires');
+          code = jsQR(imageData.data, hires.width, hires.height, { inversionAttempts: 'attemptBoth' });
+          if (code) {
+            ScanTelemetry.addSuccess('jsqr', 'static-original-hires');
+            lastDetectionSource = 'static:jsqr:original-hires';
+            console.log('[DEBUG_QR] ✅ jsQR hires leu:', code.data.substring(0, 30) + '...');
+            code = code.data;
+          }
+        }
+
+        if (code) {
+          console.log('[DEBUG_QR] ✅ Captura estática bem-sucedida!');
+          statusText.textContent = '✅ QR lido da foto estática!';
+          frame.style.borderColor = '#22c55e';
+          frame.style.boxShadow = '0 0 25px rgba(34,197,94,.7)';
+          progressFill.style.width = '100%';
+          
+          setTimeout(() => {
+            finishWithCode(code);
+          }, 500);
+        } else {
+          statusText.textContent = '❌ Nenhum QR encontrado na foto. Tente novamente.';
+          setScannerUiState('error', 'Falha na captura, tente novamente');
+          UI.showToast('Nenhum QR lido na captura. Posicione melhor ou tente escanear.', '#ef4444');
+          captureBtn.disabled = false;
+          cancelBtn.disabled = false;
+          scanPaused = false;
+          setTimeout(() => {
+            if (!settled) setScannerUiState('active', 'Scanner ativo');
+          }, 500);
+        }
+      } catch (err) {
+        console.error('[DEBUG_QR] ❌ Erro na captura estática:', err);
+        statusText.textContent = '❌ Erro na captura: ' + (err.message || 'desconhecido');
+        setScannerUiState('error', 'Erro na captura');
+        UI.showToast('Erro ao capturar: ' + err.message, '#ef4444');
+        captureBtn.disabled = false;
+        cancelBtn.disabled = false;
+        scanPaused = false;
+        setTimeout(() => {
+          if (!settled) setScannerUiState('active', 'Scanner ativo');
+        }, 500);
+      }
+    }
+
+    // Handler: Captura estática (foto) com decode em alta resolução
+    captureBtn.onclick = handleStaticCapture;
+    captureBtn.addEventListener('touchend', (e) => {
+      e.preventDefault();
+      handleStaticCapture();
+    }, { passive: false });
+
+    function handleCancelScan() {
+      settled = true;
+      setScannerUiState('error', 'Leitura cancelada');
       cleanup();
       reject(new Error('Cancelado'));
-    };
+    }
+
+    cancelBtn.onclick = handleCancelScan;
+    cancelBtn.addEventListener('touchend', (e) => {
+      e.preventDefault();
+      handleCancelScan();
+    }, { passive: false });
 
     // =========================
     // POSICIONAMENTO
@@ -4350,17 +5096,679 @@ async function scanQrFromCamera() {
       );
     }
 
+    function getQrCenter(location) {
+      const xs = [
+        location.topLeftCorner.x,
+        location.topRightCorner.x,
+        location.bottomLeftCorner.x,
+        location.bottomRightCorner.x
+      ];
+      const ys = [
+        location.topLeftCorner.y,
+        location.topRightCorner.y,
+        location.bottomLeftCorner.y,
+        location.bottomRightCorner.y
+      ];
+      return {
+        x: xs.reduce((a, b) => a + b, 0) / xs.length,
+        y: ys.reduce((a, b) => a + b, 0) / ys.length
+      };
+    }
+
+    function isCenteredEnough(location, target, tolerance = 32) {
+      const center = getQrCenter(location);
+      return (
+        center.x >= (target.x - tolerance) &&
+        center.y >= (target.y - tolerance) &&
+        center.x <= (target.x + target.size + tolerance) &&
+        center.y <= (target.y + target.size + tolerance)
+      );
+    }
+
+    function pickPreferredRearCamera(devices) {
+      const cams = (devices || []).filter(d => d.kind === 'videoinput');
+      if (!cams.length) return null;
+
+      const score = cam => {
+        const label = String(cam.label || '').toLowerCase();
+        let value = 0;
+        if (/back|rear|environment|traseir/.test(label)) value += 10;
+        if (/wide|main|principal|camera 0|camera0/.test(label)) value += 6;
+        if (/ultra|macro/.test(label)) value -= 8;
+        if (/front|selfie|frontal/.test(label)) value -= 12;
+        return value;
+      };
+
+      return cams.slice().sort((a, b) => score(b) - score(a))[0] || null;
+    }
+
+    function markDetected(codeData, message) {
+      // Para QR bem-posicionado, aceita imediatamente após primeira detecção
+      const sameCode = codeData === lastCodeData;
+      const isStable = sameCode && stableCount >= 0; // Se é o mesmo código
+      stableCount = sameCode ? stableCount + 1 : 1;
+      lastCodeData = codeData;
+
+      frame.style.borderColor = '#22c55e';
+      frame.style.boxShadow = '0 0 25px rgba(34,197,94,.7)';
+      scanLine.style.animationPlayState = 'paused';
+      statusText.textContent = message || '✅ QR detectado — aguarde...';
+      
+      console.log('[DEBUG_QR] 🎯 markDetected chamado | stableCount:', stableCount, '| sameCode:', sameCode, '| código:', codeData.substring(0, 30) + '...');
+
+      // ✅ Confirma com 1 leitura para QR bem posicionado (empresas usam confirmação única)
+      if (stableCount >= 1) {
+        console.log('[DEBUG_QR] ✅ Código bem-posicionado confirmado! Resolvendo...');
+        if (!ScanTelemetry.acceptedSource) {
+          ScanTelemetry.acceptedSource = lastDetectionSource || 'unknown';
+        }
+        finishWithCode(codeData);
+        return true;
+      }
+
+      return false;
+    }
+
+    function clamp(value, min, max) {
+      return Math.max(min, Math.min(max, value));
+    }
+
+    function buildAdaptiveContext(imageData, isDirtyMode) {
+      const data = imageData.data;
+      const pixelCount = Math.max(1, (data.length / 4) | 0);
+      const step = Math.max(1, Math.floor(pixelCount / 1024));
+
+      let sum = 0;
+      let sumSq = 0;
+      let min = 255;
+      let max = 0;
+      let sampled = 0;
+
+      for (let p = 0; p < pixelCount; p += step) {
+        const i = p * 4;
+        const gray = (0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]);
+        sum += gray;
+        sumSq += gray * gray;
+        if (gray < min) min = gray;
+        if (gray > max) max = gray;
+        sampled++;
+      }
+
+      const avg = sampled > 0 ? (sum / sampled) : 128;
+      const variance = sampled > 0 ? Math.max(0, (sumSq / sampled) - (avg * avg)) : 0;
+      const stdDev = Math.sqrt(variance);
+      const contrast = Math.max(1, max - min);
+
+      const darkScene = avg < 95;
+      const brightScene = avg > 180;
+      const lowContrast = contrast < 55;
+      const noisyFrame = stdDev > 52;
+
+      const binaryThreshold = clamp(
+        avg + (darkScene ? -8 : 0) + (brightScene ? 6 : 0) + (lowContrast ? -6 : 0),
+        70,
+        190
+      );
+
+      const aggressiveFactor = clamp(
+        (isDirtyMode ? 0.76 : 0.8) + (darkScene ? -0.03 : 0) + (lowContrast ? -0.03 : 0) + (noisyFrame ? -0.02 : 0),
+        0.66,
+        0.86
+      );
+
+      const aggressiveRadius = clamp(
+        9 + (isDirtyMode ? 2 : 0) + (lowContrast ? 2 : 0) + (noisyFrame ? 1 : 0),
+        8,
+        14
+      );
+
+      const maskBottomRatio = clamp(
+        0.24 + (isDirtyMode ? 0.08 : 0) + (lowContrast ? 0.04 : 0),
+        0.2,
+        0.42
+      );
+
+      return {
+        avg,
+        stdDev,
+        contrast,
+        lowContrast,
+        binaryThreshold,
+        aggressiveFactor,
+        aggressiveRadius,
+        maskBottomRatio
+      };
+    }
+
+    // =========================================================================
+    // 🏭 PRE-PROCESSAMENTO AVANÇADO (PADRÃO INDUSTRIAL)
+    // =========================================================================
+    
+    function sharpenImage(imageData) {
+      // Unsharp mask para melhorar bordas borradas (usado por Amazon/FedEx)
+      const src = imageData.data;
+      const width = imageData.width;
+      const height = imageData.height;
+      const out = new Uint8ClampedArray(src.length);
+      
+      // Kernel de sharpening (Laplacian)
+      const kernel = [
+        [0, -1, 0],
+        [-1, 5, -1],
+        [0, -1, 0]
+      ];
+      
+      for (let y = 1; y < height - 1; y++) {
+        for (let x = 1; x < width - 1; x++) {
+          let r = 0, g = 0, b = 0;
+          
+          for (let ky = -1; ky <= 1; ky++) {
+            for (let kx = -1; kx <= 1; kx++) {
+              const idx = ((y + ky) * width + (x + kx)) * 4;
+              const weight = kernel[ky + 1][kx + 1];
+              r += src[idx] * weight;
+              g += src[idx + 1] * weight;
+              b += src[idx + 2] * weight;
+            }
+          }
+          
+          const outIdx = (y * width + x) * 4;
+          out[outIdx] = Math.max(0, Math.min(255, r));
+          out[outIdx + 1] = Math.max(0, Math.min(255, g));
+          out[outIdx + 2] = Math.max(0, Math.min(255, b));
+          out[outIdx + 3] = 255;
+        }
+      }
+      
+      return out;
+    }
+    
+    function denoiseImage(imageData) {
+      // Median filter para remover ruído (etiquetas de tecido)
+      const src = imageData.data;
+      const width = imageData.width;
+      const height = imageData.height;
+      const out = new Uint8ClampedArray(src.length);
+      
+      for (let y = 1; y < height - 1; y++) {
+        for (let x = 1; x < width - 1; x++) {
+          const neighbors = [];
+          
+          for (let dy = -1; dy <= 1; dy++) {
+            for (let dx = -1; dx <= 1; dx++) {
+              const idx = ((y + dy) * width + (x + dx)) * 4;
+              const lum = (src[idx] * 0.299 + src[idx + 1] * 0.587 + src[idx + 2] * 0.114) | 0;
+              neighbors.push(lum);
+            }
+          }
+          
+          neighbors.sort((a, b) => a - b);
+          const median = neighbors[4]; // Centro de 9 valores
+          
+          const outIdx = (y * width + x) * 4;
+          out[outIdx] = median;
+          out[outIdx + 1] = median;
+          out[outIdx + 2] = median;
+          out[outIdx + 3] = 255;
+        }
+      }
+      
+      return out;
+    }
+
+    function toGrayscaleHighContrast(imageData) {
+      const src = imageData.data;
+      const out = new Uint8ClampedArray(src.length);
+
+      let minLum = 255;
+      let maxLum = 0;
+
+      for (let i = 0; i < src.length; i += 4) {
+        const lum = (src[i] * 0.299 + src[i + 1] * 0.587 + src[i + 2] * 0.114) | 0;
+        if (lum < minLum) minLum = lum;
+        if (lum > maxLum) maxLum = lum;
+      }
+
+      const range = Math.max(1, maxLum - minLum);
+
+      for (let i = 0; i < src.length; i += 4) {
+        const lum = (src[i] * 0.299 + src[i + 1] * 0.587 + src[i + 2] * 0.114) | 0;
+        const normalized = Math.max(0, Math.min(255, ((lum - minLum) * 255) / range));
+        out[i] = normalized;
+        out[i + 1] = normalized;
+        out[i + 2] = normalized;
+        out[i + 3] = 255;
+      }
+
+      return out;
+    }
+
+    function toAdaptiveBinary(imageData, adaptiveCtx = null) {
+      const src = imageData.data;
+      const out = new Uint8ClampedArray(src.length);
+      let sum = 0;
+      let pixels = 0;
+
+      for (let i = 0; i < src.length; i += 4) {
+        const lum = (src[i] * 0.299 + src[i + 1] * 0.587 + src[i + 2] * 0.114) | 0;
+        sum += lum;
+        pixels++;
+      }
+
+      const avg = pixels > 0 ? (sum / pixels) : 128;
+      const threshold = adaptiveCtx && Number.isFinite(adaptiveCtx.binaryThreshold)
+        ? adaptiveCtx.binaryThreshold
+        : Math.max(80, Math.min(180, avg));
+
+      for (let i = 0; i < src.length; i += 4) {
+        const lum = (src[i] * 0.299 + src[i + 1] * 0.587 + src[i + 2] * 0.114) | 0;
+        const bw = lum > threshold ? 255 : 0;
+        out[i] = bw;
+        out[i + 1] = bw;
+        out[i + 2] = bw;
+        out[i + 3] = 255;
+      }
+
+      return out;
+    }
+
+    function maskLowerLeftNoise(data, width, height, coverXRatio = 0.35, coverYRatio = 0.35) {
+      const out = new Uint8ClampedArray(data);
+      const xMax = Math.max(1, Math.floor(width * coverXRatio));
+      const yStart = Math.max(0, Math.floor(height * (1 - coverYRatio)));
+
+      for (let y = yStart; y < height; y++) {
+        for (let x = 0; x < xMax; x++) {
+          const idx = (y * width + x) * 4;
+          out[idx] = 255;
+          out[idx + 1] = 255;
+          out[idx + 2] = 255;
+          out[idx + 3] = 255;
+        }
+      }
+
+      return out;
+    }
+    
+    // Nova função: Mascarar todo o perímetro inferior (bottom edge completo)
+    function maskBottomEdge(data, width, height, coverYRatio = 0.30) {
+      const out = new Uint8ClampedArray(data);
+      const yStart = Math.max(0, Math.floor(height * (1 - coverYRatio)));
+
+      for (let y = yStart; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          const idx = (y * width + x) * 4;
+          out[idx] = 255;
+          out[idx + 1] = 255;
+          out[idx + 2] = 255;
+          out[idx + 3] = 255;
+        }
+      }
+
+      return out;
+    }
+    
+    // ✅ NOVO: Equalização de histograma para melhorar contraste em códigos sujos
+    function equalizeHistogram(imageData) {
+      const data = imageData.data;
+      const width = imageData.width;
+      const height = imageData.height;
+      const out = new Uint8ClampedArray(data.length);
+      const histogram = new Array(256).fill(0);
+      
+      // Calcular histograma de luminância
+      for (let i = 0; i < data.length; i += 4) {
+        const gray = Math.floor(0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]);
+        histogram[gray]++;
+      }
+      
+      // Calcular CDF (Cumulative Distribution Function)
+      const cdf = new Array(256).fill(0);
+      cdf[0] = histogram[0];
+      for (let i = 1; i < 256; i++) {
+        cdf[i] = cdf[i - 1] + histogram[i];
+      }
+      
+      // Normalizar CDF
+      const totalPixels = width * height;
+      const cdfMin = cdf.find(v => v > 0) || 0;
+      const lookup = new Array(256);
+      for (let i = 0; i < 256; i++) {
+        lookup[i] = Math.round(((cdf[i] - cdfMin) / (totalPixels - cdfMin)) * 255);
+      }
+      
+      // Aplicar equalização
+      for (let i = 0; i < data.length; i += 4) {
+        const gray = Math.floor(0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]);
+        const equalized = lookup[gray] || 0;
+        out[i] = equalized;
+        out[i + 1] = equalized;
+        out[i + 2] = equalized;
+        out[i + 3] = 255;
+      }
+      
+      return out;
+    }
+
+    // ✅ NOVO: Threshold adaptativo mais agressivo para QR muito sujos
+    function toAggressiveBinary(imageData, adaptiveCtx = null) {
+      const data = imageData.data;
+      const width = imageData.width;
+      const height = imageData.height;
+      const out = new Uint8ClampedArray(data.length);
+      const radius = adaptiveCtx && Number.isFinite(adaptiveCtx.aggressiveRadius)
+        ? adaptiveCtx.aggressiveRadius
+        : 10;
+      const thresholdFactor = adaptiveCtx && Number.isFinite(adaptiveCtx.aggressiveFactor)
+        ? adaptiveCtx.aggressiveFactor
+        : 0.78;
+      const integralWidth = width + 1;
+      const integralHeight = height + 1;
+      const integral = new Float32Array(integralWidth * integralHeight);
+
+      for (let y = 1; y <= height; y++) {
+        let rowSum = 0;
+        for (let x = 1; x <= width; x++) {
+          const idx = ((y - 1) * width + (x - 1)) * 4;
+          const gray = (0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2]);
+          rowSum += gray;
+          integral[y * integralWidth + x] = integral[(y - 1) * integralWidth + x] + rowSum;
+        }
+      }
+
+      for (let y = 0; y < height; y++) {
+        const y0 = Math.max(0, y - radius);
+        const y1 = Math.min(height - 1, y + radius);
+
+        for (let x = 0; x < width; x++) {
+          const x0 = Math.max(0, x - radius);
+          const x1 = Math.min(width - 1, x + radius);
+
+          const A = integral[y0 * integralWidth + x0];
+          const B = integral[y0 * integralWidth + (x1 + 1)];
+          const C = integral[(y1 + 1) * integralWidth + x0];
+          const D = integral[(y1 + 1) * integralWidth + (x1 + 1)];
+          const count = (x1 - x0 + 1) * (y1 - y0 + 1);
+          const localMean = count > 0 ? (D - B - C + A) / count : 128;
+
+          const idx = (y * width + x) * 4;
+          const gray = (0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2]);
+          const threshold = localMean * thresholdFactor;
+          const binaryVal = gray > threshold ? 255 : 0;
+
+          out[idx] = binaryVal;
+          out[idx + 1] = binaryVal;
+          out[idx + 2] = binaryVal;
+          out[idx + 3] = 255;
+        }
+      }
+
+      return out;
+    }
+
+    // ✅ NOVO: Desfoque gaussiano leve (remove ruído sem perder detalhes)
+    function gaussianBlur(imageData) {
+      const data = imageData.data;
+      const width = imageData.width;
+      const height = imageData.height;
+      const out = new Uint8ClampedArray(data.length);
+      
+      // Kernel Gaussiano 3x3 normalizado
+      const kernel = [
+        1/16, 2/16, 1/16,
+        2/16, 4/16, 2/16,
+        1/16, 2/16, 1/16
+      ];
+      
+      for (let y = 1; y < height - 1; y++) {
+        for (let x = 1; x < width - 1; x++) {
+          let r = 0, g = 0, b = 0;
+          let ki = 0;
+          
+          for (let dy = -1; dy <= 1; dy++) {
+            for (let dx = -1; dx <= 1; dx++) {
+              const idx = ((y + dy) * width + (x + dx)) * 4;
+              const k = kernel[ki++];
+              r += data[idx] * k;
+              g += data[idx + 1] * k;
+              b += data[idx + 2] * k;
+            }
+          }
+          
+          const idx = (y * width + x) * 4;
+          out[idx] = r;
+          out[idx + 1] = g;
+          out[idx + 2] = b;
+          out[idx + 3] = 255;
+        }
+      }
+      
+      // Copiar bordas
+      for (let x = 0; x < width; x++) {
+        const idx0 = x * 4;
+        const idxH = ((height - 1) * width + x) * 4;
+        for (let c = 0; c < 3; c++) {
+          out[idx0 + c] = data[idx0 + c];
+          out[idxH + c] = data[idxH + c];
+        }
+        out[idx0 + 3] = 255;
+        out[idxH + 3] = 255;
+      }
+      for (let y = 0; y < height; y++) {
+        const idx0 = y * width * 4;
+        const idxW = (y * width + width - 1) * 4;
+        for (let c = 0; c < 3; c++) {
+          out[idx0 + c] = data[idx0 + c];
+          out[idxW + c] = data[idxW + c];
+        }
+        out[idx0 + 3] = 255;
+        out[idxW + 3] = 255;
+      }
+      
+      return out;
+    }
+
+    function upscaleImageData(sourceData, width, height, scale = 2) {
+      const targetW = Math.max(1, Math.floor(width * scale));
+      const targetH = Math.max(1, Math.floor(height * scale));
+      const out = new Uint8ClampedArray(targetW * targetH * 4);
+
+      for (let y = 0; y < targetH; y++) {
+        const sy = Math.min(height - 1, Math.floor(y / scale));
+        for (let x = 0; x < targetW; x++) {
+          const sx = Math.min(width - 1, Math.floor(x / scale));
+          const sIdx = (sy * width + sx) * 4;
+          const tIdx = (y * targetW + x) * 4;
+          out[tIdx] = sourceData[sIdx];
+          out[tIdx + 1] = sourceData[sIdx + 1];
+          out[tIdx + 2] = sourceData[sIdx + 2];
+          out[tIdx + 3] = 255;
+        }
+      }
+
+      return { data: out, width: targetW, height: targetH };
+    }
+
+    function decodeWithVariants(imageData, isDirtyMode = false, adaptiveCtx = null) {
+      const width = imageData.width;
+      const height = imageData.height;
+      const contrast = toGrayscaleHighContrast(imageData);
+      const binary = toAdaptiveBinary(imageData, adaptiveCtx);
+      const upscaledOriginal = upscaleImageData(imageData.data, width, height, 2);
+      const upscaledContrast = upscaleImageData(contrast, width, height, 2);
+      
+      // ✅ Aplicar masking para códigos sujos (etiquetas de tecido)
+      const maskRatio = adaptiveCtx && Number.isFinite(adaptiveCtx.maskBottomRatio)
+        ? adaptiveCtx.maskBottomRatio
+        : 0.30;
+      const maskedBottom = maskBottomEdge(imageData.data, width, height, maskRatio);
+
+      let variants = [];
+
+      if (!isDirtyMode) {
+        // ⚡ Modo limpo: Original primeiro (rápido), depois variantes básicas
+        variants = [
+          { data: imageData.data, name: 'original' },
+          { data: contrast, name: 'contrast' },
+          { data: upscaledOriginal.data, name: 'upscaled-original', width: upscaledOriginal.width, height: upscaledOriginal.height },
+          { data: binary, name: 'binary' }
+        ];
+      } else {
+        // 🏭 Modo sujo: Estratégias agressivas primeiro
+        console.log('[DEBUG_QR] ⚠️ Modo SUJO ativado - tentando estratégias agressivas');
+        const equalized = equalizeHistogram(imageData);
+        const aggressive = toAggressiveBinary(imageData, adaptiveCtx);
+        const maskedLowerLeft = maskLowerLeftNoise(imageData.data, width, height, 0.40, 0.40);
+        
+        variants = [
+          { data: equalized, name: 'equalized' },
+          { data: aggressive, name: 'aggressive-binary' },
+          { data: maskedLowerLeft, name: 'masked-lower-left' },
+          { data: upscaledOriginal.data, name: 'upscaled-original', width: upscaledOriginal.width, height: upscaledOriginal.height },
+          { data: upscaledContrast.data, name: 'upscaled-contrast', width: upscaledContrast.width, height: upscaledContrast.height },
+          { data: contrast, name: 'contrast' },
+          { data: binary, name: 'binary' },
+          { data: maskedBottom, name: 'masked-bottom' },
+          { data: imageData.data, name: 'original' }
+        ];
+      }
+
+      for (const variant of variants) {
+        const vWidth = variant.width || width;
+        const vHeight = variant.height || height;
+        ScanTelemetry.addAttempt('jsqr', variant.name);
+        const decoded = jsQR(variant.data, vWidth, vHeight, { inversionAttempts: 'attemptBoth' });
+        if (decoded) {
+          ScanTelemetry.addSuccess('jsqr', variant.name);
+          if (variant.name !== 'original') {
+            console.log('[DEBUG_QR] ✅ jsQR leu com:', variant.name);
+          }
+          decoded.__strategy = `jsqr:${variant.name}`;
+          return decoded;
+        }
+      }
+
+      return null;
+    }
+
+    function tryDecodeRegion(ctx, x, y, size, isDirtyMode = false, adaptiveCtx = null) {
+      try {
+        const img = ctx.getImageData(x, y, size, size);
+        return decodeWithVariants(img, isDirtyMode, adaptiveCtx);
+      } catch (e) {
+        return null;
+      }
+    }
+
+    function decodeMultiPass(ctx, width, height, isDirtyMode = false, adaptiveCtx = null) {
+      const baseSize = Math.floor(Math.min(width, height));
+      // ✅ Passes otimizados para cobrir QR em diferentes posições/tamanhos
+      const scans = [
+        { ratio: 1.0, dx: 0, dy: 0 },
+        { ratio: 0.92, dx: 0, dy: 0 },
+        { ratio: 0.78, dx: 0.15, dy: -0.12 },
+        { ratio: 0.78, dx: -0.15, dy: 0.12 },
+        { ratio: 0.65, dx: 0, dy: 0 }
+      ];
+
+      if (isDirtyMode) {
+        scans.push(
+          { ratio: 0.72, dx: -0.20, dy: -0.15 },
+          { ratio: 0.72, dx: 0.20, dy: 0.15 }
+        );
+      }
+
+      for (let i = 0; i < scans.length; i++) {
+        const ratio = scans[i].ratio;
+        const size = Math.max(220, Math.floor(baseSize * ratio));
+
+        const centeredX = (width - size) / 2;
+        const centeredY = (height - size) / 2;
+        const shiftedX = centeredX + (size * (scans[i].dx || 0));
+        const shiftedY = centeredY + (size * (scans[i].dy || 0));
+
+        const sx = Math.max(0, Math.min(Math.floor(shiftedX), Math.max(0, width - size)));
+        const sy = Math.max(0, Math.min(Math.floor(shiftedY), Math.max(0, height - size)));
+
+        const decoded = tryDecodeRegion(ctx, sx, sy, size, isDirtyMode, adaptiveCtx);
+        if (decoded) {
+          return { code: decoded, sx, sy, size };
+        }
+      }
+
+      return null;
+    }
+
     async function start() {
       console.log('[DEBUG_QR] 🎬 Função start() iniciada - solicitando acesso à câmera...');
       
       try {
-        stream = await navigator.mediaDevices.getUserMedia({
-          video: {
-            facingMode: 'environment',
-            width: { ideal: 1280 },
-            height: { ideal: 720 }
+        // Tentar com constraints ideais primeiro
+        try {
+          const baseVideoConstraints = isIOSDevice
+            ? {
+                facingMode: { ideal: 'environment' },
+                width: { ideal: 1280 },
+                height: { ideal: 720 },
+                frameRate: { ideal: 24, min: 15 }
+              }
+            : {
+                facingMode: { ideal: 'environment' },
+                width: { ideal: 1920 },
+                height: { ideal: 1080 },
+                frameRate: { ideal: 30, min: 15 }
+              };
+
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: baseVideoConstraints,
+            audio: false
+          });
+          console.log('[DEBUG_QR] ✅ Camera com constraints ideais obtida');
+        } catch (constraintError) {
+          console.warn('[DEBUG_QR] ⚠️ Constraints ideais falharam:', constraintError?.message);
+          console.log('[DEBUG_QR] 🔄 Tentando com constraints mínimos...');
+          
+          // Fallback: tentar com constraints mais flexíveis
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: {
+              facingMode: { ideal: 'environment' }
+            },
+            audio: false
+          });
+          console.log('[DEBUG_QR] ✅ Camera com constraints mínimos obtida');
+        }
+
+        // No iPhone NÃO alternar dispositivo automaticamente (isso causa salto de zoom/lente).
+        // No Android, mantém seleção da melhor câmera traseira.
+        if (!isIOSDevice) {
+          try {
+            const devices = await navigator.mediaDevices.enumerateDevices();
+            const preferred = pickPreferredRearCamera(devices);
+            const currentTrack = stream.getVideoTracks()[0];
+            const activeDeviceId = currentTrack?.getSettings?.().deviceId;
+
+            if (preferred?.deviceId && preferred.deviceId !== activeDeviceId) {
+              try {
+                const switchedStream = await navigator.mediaDevices.getUserMedia({
+                  video: {
+                    deviceId: { exact: preferred.deviceId },
+                    width: { ideal: 1920 },
+                    height: { ideal: 1080 },
+                    frameRate: { ideal: 30, min: 15 }
+                  },
+                  audio: false
+                });
+                stream.getTracks().forEach(t => t.stop());
+                stream = switchedStream;
+                console.log('[DEBUG_QR] 🔄 Câmera traseira preferida selecionada:', preferred.label || preferred.deviceId);
+              } catch (switchErr) {
+                console.warn('[DEBUG_QR] ⚠️ Falha ao selecionar câmera preferida, usando current:', switchErr?.message);
+              }
+            }
+          } catch (switchErr) {
+            console.warn('[DEBUG_QR] ⚠️ Não foi possível trocar câmera automaticamente:', switchErr?.message || switchErr);
           }
-        });
+        }
         
         console.log('[DEBUG_QR] ✅ Acesso à câmera concedido!');
         console.log('[DEBUG_QR] Stream obtido:', stream);
@@ -4370,16 +5778,51 @@ async function scanQrFromCamera() {
         console.log('[DEBUG_QR] ▶️ Vídeo iniciado');
 
         // Zoom + foco (quando disponível)
-        const track = stream.getVideoTracks()[0];
-        const caps = track.getCapabilities?.();
-        if (caps?.zoom) {
-          track.applyConstraints({ advanced: [{ zoom: 2.5 }] });
-          console.log('[DEBUG_QR] 🔍 Zoom aplicado');
+        activeTrack = stream.getVideoTracks()[0];
+        const caps = activeTrack.getCapabilities?.();
+        const advanced = [];
+
+        if (caps?.focusMode && Array.isArray(caps.focusMode)) {
+          if (caps.focusMode.includes('continuous') && !isIOSDevice) {
+            advanced.push({ focusMode: 'continuous' });
+          } else if (caps.focusMode.includes('single-shot')) {
+            advanced.push({ focusMode: 'single-shot' });
+          }
         }
-        track.applyConstraints?.({
-          advanced: [{ focusMode: 'continuous' }]
-        });
+
+        if (caps?.exposureMode && Array.isArray(caps.exposureMode) && caps.exposureMode.includes('continuous') && !isIOSDevice) {
+          advanced.push({ exposureMode: 'continuous' });
+        }
+        if (caps?.whiteBalanceMode && Array.isArray(caps.whiteBalanceMode) && caps.whiteBalanceMode.includes('continuous') && !isIOSDevice) {
+          advanced.push({ whiteBalanceMode: 'continuous' });
+        }
+
+        if (caps?.zoom) {
+          const minZoom = Number(caps.zoom.min || 1);
+          const maxZoom = Number(caps.zoom.max || minZoom);
+          const targetZoom = isIOSDevice
+            ? Math.min(maxZoom, Math.max(minZoom, minZoom + ((maxZoom - minZoom) * 0.25)))
+            : Math.min(maxZoom, Math.max(minZoom, 1.6));
+          advanced.push({ zoom: targetZoom });
+        }
+
+        torchSupported = !!caps?.torch;
+
+        if (advanced.length) {
+          await activeTrack.applyConstraints({ advanced });
+        }
         console.log('[DEBUG_QR] 📹 Configurações de câmera aplicadas');
+
+        // Detector nativo do Chrome (mais robusto em Android)
+        if ('BarcodeDetector' in window) {
+          try {
+            detector = new BarcodeDetector({ formats: ['qr_code'] });
+            console.log('[DEBUG_QR] ✅ BarcodeDetector ativo');
+          } catch (detErr) {
+            detector = null;
+            console.warn('[DEBUG_QR] ⚠️ BarcodeDetector indisponível:', detErr?.message || detErr);
+          }
+        }
       } catch (error) {
         console.error('[DEBUG_QR] ❌ ERRO ao acessar câmera:', error);
         console.error('[DEBUG_QR] Nome do erro:', error.name);
@@ -4388,82 +5831,504 @@ async function scanQrFromCamera() {
       }
 
       const canvas = document.createElement('canvas');
-      const ctx = canvas.getContext('2d');
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      const statsCanvas = document.createElement('canvas');
+      statsCanvas.width = 64;
+      statsCanvas.height = 64;
+      const statsCtx = statsCanvas.getContext('2d', { willReadFrequently: true });
 
       interval = setInterval(() => {
+        if (settled) return;
+        if (scanPaused) return;
+        if (scanLoopBusy) return;
         if (video.readyState !== video.HAVE_ENOUGH_DATA) return;
+        scanLoopBusy = true;
+        setScannerUiState('busy', 'Processando frame');
+
+        try {
+        frameTick++;
 
         canvas.width = video.videoWidth;
         canvas.height = video.videoHeight;
+        ctx.imageSmoothingEnabled = false;
         ctx.drawImage(video, 0, 0);
 
-        const scanSize = Math.min(canvas.width, canvas.height) * 0.6;
-        const sx = (canvas.width - scanSize) / 2;
-        const sy = (canvas.height - scanSize) / 2;
+        const heavyStep = isIOSDevice ? 2 : (isAndroidDevice ? 2 : 1);
+        const shouldRunHeavy = frameTick <= 4 || frameTick % heavyStep === 0;
 
-        const imageData = ctx.getImageData(sx, sy, scanSize, scanSize);
+        // 1) Tentativa nativa (Chrome/Android) - melhora taxa de leitura no S23
+        // ⚠️ OTIMIZADO: Desabilitar em mobile lowend para economizar CPU
+        const isLowEndMobile = /Android|iPhone|iPad/.test(navigator.userAgent) && lowEndByMemory;
+        const useBarcodeDetector = detector && !detectorBusy && !isLowEndMobile;
+        const nativeStep = isAndroidDevice ? 1 : 2;
+        
+        if (useBarcodeDetector && (frameTick % nativeStep === 0)) {
+          detectorBusy = true;
+          createImageBitmap(canvas)
+            .then(bitmap => detector.detect(bitmap).finally(() => bitmap.close()))
+            .then(results => {
+              const first = Array.isArray(results) ? results[0] : null;
+              const rawValue = first?.rawValue;
+              if (rawValue) {
+                ScanTelemetry.nativeDetections++;
+                lastDetectionSource = 'native:barcodedetector';
+                console.log('[DEBUG_QR] 📱 BarcodeDetector nativo detectou:', rawValue.substring(0, 30) + '...');
+                markDetected(rawValue, '✅ QR detectado (modo nativo) — aguarde...');
+              }
+            })
+            .catch(() => {})
+            .finally(() => {
+              detectorBusy = false;
+            });
+        }
 
-        const code = jsQR(
-          imageData.data,
-          imageData.width,
-          imageData.height,
-          { inversionAttempts: 'attemptBoth' }
-        );
+        if (!shouldRunHeavy) {
+          return;
+        }
+
+        // 2) Fallback jsQR (mantém compatibilidade)
+        // ✅ Ativar modo sujo após 10 tentativas sem sucesso
+        const isDirtyMode = frameTick > 8;
+
+        if (statsCtx) {
+          statsCtx.drawImage(canvas, 0, 0, statsCanvas.width, statsCanvas.height);
+          const statsImageData = statsCtx.getImageData(0, 0, statsCanvas.width, statsCanvas.height);
+          lastAdaptiveContext = buildAdaptiveContext(statsImageData, isDirtyMode);
+        }
+
+        const adaptiveCtx = lastAdaptiveContext;
+
+        // Controle de luz dinâmica (quando torch disponível) a cada ~2s
+        if (torchSupported && activeTrack && frameTick % 20 === 0 && adaptiveCtx) {
+          const lowLight = Number(adaptiveCtx.avg || 128) < 90;
+          if (lowLight !== torchOn) {
+            activeTrack.applyConstraints({ advanced: [{ torch: lowLight }] }).then(() => {
+              torchOn = lowLight;
+            }).catch(() => {});
+          }
+        }
+
+        let decodeResult = decodeMultiPass(ctx, canvas.width, canvas.height, isDirtyMode, adaptiveCtx);
+        let code = decodeResult?.code || null;
+        let sx = decodeResult?.sx || 0;
+        let sy = decodeResult?.sy || 0;
+        let scanSize = decodeResult?.size || Math.min(canvas.width, canvas.height) * 0.8;
+
+        // Fallback full-frame (importante para QR fora do centro, comum em S23)
+        if (!code) {
+          try {
+            const fullImage = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const fullDecoded = decodeWithVariants(fullImage, isDirtyMode, adaptiveCtx);
+            if (fullDecoded) {
+              code = fullDecoded;
+              sx = 0;
+              sy = 0;
+              scanSize = Math.min(canvas.width, canvas.height);
+              if (!code.location) {
+                const estimatedSize = Math.min(canvas.width, canvas.height) * 0.32;
+                code.location = {
+                  topLeftCorner: { x: (canvas.width - estimatedSize) / 2, y: (canvas.height - estimatedSize) / 2 },
+                  topRightCorner: { x: (canvas.width + estimatedSize) / 2, y: (canvas.height - estimatedSize) / 2 },
+                  bottomLeftCorner: { x: (canvas.width - estimatedSize) / 2, y: (canvas.height + estimatedSize) / 2 },
+                  bottomRightCorner: { x: (canvas.width + estimatedSize) / 2, y: (canvas.height + estimatedSize) / 2 }
+                };
+              }
+            }
+          } catch (e) {}
+        }
+
+        if (code?.__strategy) {
+          lastDetectionSource = code.__strategy;
+        }
+
+        if (code?.data) {
+          const currentDecoded = String(code.data || '').trim();
+          if (currentDecoded && currentDecoded === lastDecodedData) {
+            decodedStableCount += 1;
+          } else {
+            lastDecodedData = currentDecoded;
+            decodedStableCount = 1;
+          }
+
+          const allowFastFinish = currentDecoded.length >= 8 && (
+            isIOSDevice ||
+            isDirtyMode ||
+            frameTick > 14
+          );
+
+          if (allowFastFinish && decodedStableCount >= 1) {
+            console.log('[DEBUG_QR] ✅ Fast-finish por decode válido:', currentDecoded.substring(0, 30) + '...');
+            finishWithCode(currentDecoded);
+            return;
+          }
+        }
+
+        // 3) � ZXING INDUSTRIAL MODE - Estratégia multi-binarizer (Amazon/FedEx)
+        const shouldTryZXing = !code && typeof ZXing !== 'undefined' && ZXing.QRCodeReader && 
+                   !isIOSDevice && (isDirtyMode ? frameTick % 3 === 0 : frameTick % 4 === 0);
+        
+        if (shouldTryZXing) {
+          try {
+            // ✅ Canvas redimensionada para ~640×480 (otimização de performance)
+            const scaleFactor = Math.max(0.3, Math.min(1, 480 / Math.max(canvas.height, 1)));
+            const resizedCanvas = document.createElement('canvas');
+            resizedCanvas.width = Math.floor(canvas.width * scaleFactor);
+            resizedCanvas.height = Math.floor(canvas.height * scaleFactor);
+            const resCtx = resizedCanvas.getContext('2d', { willReadFrequently: true });
+            resCtx.drawImage(canvas, 0, 0, resizedCanvas.width, resizedCanvas.height);
+            
+            const imageData = resCtx.getImageData(0, 0, resizedCanvas.width, resizedCanvas.height);
+            const width = resizedCanvas.width;
+            const height = resizedCanvas.height;
+            
+            // ✅ Variantes baseadas no modo (limpo vs sujo)
+            let zxingVariants = [];
+            
+            if (!isDirtyMode) {
+              // Modo limpo: variantes básicas
+              const contrast = toGrayscaleHighContrast(imageData);
+              const binary = toAdaptiveBinary(imageData, adaptiveCtx);
+              const maskedBottom = maskBottomEdge(
+                imageData.data,
+                width,
+                height,
+                adaptiveCtx && Number.isFinite(adaptiveCtx.maskBottomRatio) ? adaptiveCtx.maskBottomRatio : 0.30
+              );
+              
+              zxingVariants = [
+                { data: imageData.data, name: 'original' },
+                { data: contrast, name: 'contrast' },
+                { data: binary, name: 'binary' },
+                { data: maskedBottom, name: 'masked-bottom' }
+              ];
+            } else {
+              // 🏭 Modo sujo: ESTRATÉGIAS AGRESSIVAS
+              console.log('[DEBUG_QR] 🔥 ZXing em modo AGRESSIVO para QR sujo');
+              const equalized = equalizeHistogram(imageData);
+              const aggressive = toAggressiveBinary(imageData, adaptiveCtx);
+              const blurred = gaussianBlur(imageData);
+              const contrast = toGrayscaleHighContrast(imageData);
+              const binary = toAdaptiveBinary(imageData, adaptiveCtx);
+              const maskedBottom = maskBottomEdge(
+                imageData.data,
+                width,
+                height,
+                adaptiveCtx && Number.isFinite(adaptiveCtx.maskBottomRatio) ? adaptiveCtx.maskBottomRatio : 0.30
+              );
+              
+              // 🎯 10 variantes × 2 binarizers = 20 estratégias para QR sujo
+              zxingVariants = [
+                { data: equalized, name: 'equalized' },
+                { data: aggressive, name: 'aggressive-binary' },
+                { data: blurred, name: 'gaussian-blur' },
+                { data: contrast, name: 'contrast' },
+                { data: binary, name: 'binary' },
+                { data: maskedBottom, name: 'masked-bottom' },
+                { data: imageData.data, name: 'original' }
+              ];
+            }
+            
+            for (const variant of zxingVariants) {
+              try {
+                const uint8Array = new Uint8ClampedArray(variant.data);
+                const luminances = new Uint8ClampedArray(width * height);
+                ScanTelemetry.addAttempt('zxing', variant.name);
+                
+                // Converter RGBA para luminância (grayscale)
+                for (let i = 0, j = 0; i < uint8Array.length; i += 4, j++) {
+                  const r = uint8Array[i];
+                  const g = uint8Array[i + 1];
+                  const b = uint8Array[i + 2];
+                  luminances[j] = Math.floor(0.299 * r + 0.587 * g + 0.114 * b);
+                }
+                
+                // 🏭 PADRÃO INDUSTRIAL: Testar AMBOS binarizers
+                const binarizers = [
+                  { name: 'Hybrid', create: (src) => new ZXing.HybridBinarizer(src) },
+                  { name: 'GlobalHistogram', create: (src) => new ZXing.GlobalHistogramBinarizer(src) }
+                ];
+                
+                for (const binarizer of binarizers) {
+                  try {
+                    const luminanceSource = new ZXing.RGBLuminanceSource(luminances, width, height);
+                    const binaryBitmap = new ZXing.BinaryBitmap(binarizer.create(luminanceSource));
+                    const reader = new ZXing.QRCodeReader();
+                    const zxingResult = reader.decode(binaryBitmap);
+                    
+                    if (zxingResult?.text) {
+                      ScanTelemetry.addSuccess('zxing', variant.name);
+                      console.log(`[DEBUG_QR] ✅ ZXing ${binarizer.name} leu com: ${variant.name}`);
+                      const estimatedSize = Math.min(width, height) * 0.3;
+                      const estimatedX = Math.max(0, (width - estimatedSize) / 2);
+                      const estimatedY = Math.max(0, (height - estimatedSize) / 2);
+                      
+                      code = { 
+                        data: zxingResult.text,
+                        __strategy: `zxing:${variant.name}:${binarizer.name}`,
+                        location: {
+                          topLeftCorner: { x: estimatedX, y: estimatedY },
+                          topRightCorner: { x: estimatedX + estimatedSize, y: estimatedY },
+                          bottomLeftCorner: { x: estimatedX, y: estimatedY + estimatedSize },
+                          bottomRightCorner: { x: estimatedX + estimatedSize, y: estimatedY + estimatedSize }
+                        }
+                      };
+                      sx = 0;
+                      sy = 0;
+                      scanSize = estimatedSize;
+                      break; // Sucesso!
+                    }
+                  } catch {}
+                }
+                
+                if (code) break; // Sucesso - sair do loop de variantes
+                
+              } catch (variantError) {
+                continue;
+              }
+            }
+            
+          } catch (zxingError) {
+            // ZXing falhou, continua silenciosamente
+            if (frameTick % 30 === 0) {
+              console.debug('[DEBUG_QR] ZXing: todas as estratégias falharam');
+            }
+          }
+        } else if (!code && frameTick === 15 && typeof ZXing === 'undefined') {
+          console.warn('[DEBUG_QR] ⚠️ ZXing não disponível - apenas jsQR + BarcodeDetector em uso');
+        }
 
         if (code) {
+          if (code.__strategy) {
+            lastDetectionSource = code.__strategy;
+          }
+          console.log('[DEBUG_QR] 📸 Frame', frameTick, '- Código detectado:', code.data.substring(0, 30) + '...');
+          
           const target = {
             x: (scanSize - frameSize) / 2,
             y: (scanSize - frameSize) / 2,
             size: frameSize
           };
 
-          if (isInsideTarget(code.location, target)) {
-            frame.style.borderColor = '#22c55e';
-            frame.style.boxShadow = '0 0 25px rgba(34,197,94,.7)';
-            scanLine.style.animationPlayState = 'paused';
-            statusText.textContent = '✅ Posição correta — aguarde...';
+          const shiftedLocation = {
+            topLeftCorner: { x: code.location.topLeftCorner.x - sx, y: code.location.topLeftCorner.y - sy },
+            topRightCorner: { x: code.location.topRightCorner.x - sx, y: code.location.topRightCorner.y - sy },
+            bottomLeftCorner: { x: code.location.bottomLeftCorner.x - sx, y: code.location.bottomLeftCorner.y - sy },
+            bottomRightCorner: { x: code.location.bottomRightCorner.x - sx, y: code.location.bottomRightCorner.y - sy }
+          };
 
-            stableCount++;
-            if (stableCount >= 3) {
-              cleanup();
-              resolve(code.data);
-            }
+          const strictInside = isInsideTarget(shiftedLocation, target);
+          const centeredEnough = isCenteredEnough(shiftedLocation, target, 100);
+          
+          // ✅ Calcular tamanho estimado do QR para detectar distância
+          const qrWidth = code.location.topRightCorner.x - code.location.topLeftCorner.x;
+          const tooClose = qrWidth > frameSize * 0.8; // QR muito grande = muito perto
+          const tooFar = qrWidth < frameSize * 0.4;   // QR muito pequeno = muito longe
+          
+          // ✅ Detectar se câmera está parada ou movendo (baseado em variação de tamanho)
+          const sizeChange = Math.abs(qrWidth - lastQRSize) / Math.max(lastQRSize, 1);
+          const isMoving = sizeChange > 0.05; // Mudança >5% = movimento
+          lastQRSize = qrWidth;
+
+          if (strictInside || centeredEnough) {
+            console.log('[DEBUG_QR] ✅ QR bem posicionado - chamando markDetected()');
+            // Atualizar feedback - ótimo!
+            updateFeedback({
+              detected: true,
+              wellPositioned: true,
+              tooFar: false,
+              tooClose: false,
+              isStable: !isMoving,
+              timeRemaining: 0
+            });
+            markDetected(code.data, '✅ Posição correta — aguarde...');
+            setScannerUiState('busy', 'QR detectado, validando');
           } else {
-            stableCount = 0;
-            frame.style.borderColor = '#ef4444';
+            // QR detectado mas fora de posição
+            const sameCode = code.data === lastCodeData;
+            stableCount = sameCode ? stableCount + 1 : 1;
+            lastCodeData = code.data;
+
+            frame.style.borderColor = '#f59e0b';
             frame.style.boxShadow = '';
             scanLine.style.animationPlayState = 'running';
-            statusText.textContent = '🔴 Centralize o QR Code';
+            const remaining = Math.max(0, 5 - Math.floor(frameTick / 10));
+            statusText.textContent = '🟡 QR detectado — centralize melhor ou aguarde ' + remaining + 's';
+            
+            // Determinar qualidade do QR baseado em tentativas
+            let quality = 'Boa';
+            if (frameTick > 30) quality = 'Ruim (sujo?)';
+            else if (frameTick > 15) quality = 'Média';
+            
+            // Atualizar feedback - detectado mas desalinhado
+            updateFeedback({
+              detected: true,
+              wellPositioned: false,
+              tooFar: tooFar,
+              tooClose: tooClose,
+              isStable: !isMoving && sameCode && stableCount > 2,
+              timeRemaining: remaining
+            });
+            
+            console.log('[DEBUG_QR] 🟡 QR fora de posição ideal | stableCount:', stableCount, '| frameTick:', frameTick);
+
+            if (stableCount >= 2 && frameTick > 20) {
+              console.log('[DEBUG_QR] ✅ Aceitar QR fora de posição após', frameTick, 'frames (~', (frameTick * 100 / 1000).toFixed(1), 's)');
+              finishWithCode(code.data);
+            } else if (frameTick > 40) {
+              console.log('[DEBUG_QR] ✅ Timeout absoluto - aceitando QR após', frameTick, 'frames (4 segundos)');
+              finishWithCode(code.data);
+            }
           }
         } else {
+          // Resetar contadores se nenhum código detectado
+          if (lastCodeData !== '') {
+            console.log('[DEBUG_QR] 🔄 QR perdido - resetando contadores');
+          }
           stableCount = 0;
+          lastCodeData = '';
+          decodedStableCount = 0;
           frame.style.borderColor = '#ef4444';
           frame.style.boxShadow = '';
           scanLine.style.animationPlayState = 'running';
           statusText.textContent = '🔴 Centralize o QR Code';
+          
+          // Atualizar feedback - não detectado
+          const remaining = Math.max(0, 2 - Math.floor(frameTick / 20));
+          updateFeedback({
+            detected: false,
+            wellPositioned: false,
+            tooFar: false,
+            tooClose: false,
+            isStable:false,
+            timeRemaining: remaining
+          });
+          setScannerUiState('active', 'Scanner ativo');
         }
-      }, 500); // Reduzido de 250ms para 500ms para economizar bateria
+        } finally {
+          scanLoopBusy = false;
+          if (!settled && !scanPaused) {
+            setScannerUiState('active', 'Scanner ativo');
+          }
+        }
+      }, 100); // ✅ OTIMIZADO: 100ms = 10 FPS para melhor taxa de detecção
     }
 
-    if (typeof jsQR === 'undefined') {
-      const s = document.createElement('script');
-      s.src = 'https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js';
-      s.onload = () => {
-        console.log('[DEBUG_QR] ✅ Biblioteca jsQR carregada');
-        start();
-      };
-      s.onerror = () => {
-        console.error('[DEBUG_QR] ❌ Erro ao carregar jsQR');
-        reject(new Error('Erro ao carregar jsQR'));
-      };
-      console.log('[DEBUG_QR] 📦 Carregando biblioteca jsQR...');
-      document.head.appendChild(s);
-    } else {
-      console.log('[DEBUG_QR] ✅ jsQR já carregado, iniciando diretamente');
-      start();
+    // 🔍 Detectar ambiente Apps Script
+    const isAppsScript = window.location.hostname.includes('script.google') || 
+                         window.location.hostname.includes('googleusercontent.com');
+    
+    if (isAppsScript) {
+      console.log('[DEBUG_QR] 🏢 Ambiente Apps Script detectado - ajustando timeouts');
     }
+
+    async function loadScriptWithFallback(urls, timeoutMs, name) {
+      let lastError = null;
+
+      for (const src of urls) {
+        try {
+          await new Promise((res, rej) => {
+            const timeout = setTimeout(() => {
+              rej(new Error(`Timeout carregando ${name} via ${src}`));
+            }, timeoutMs);
+
+            const s = document.createElement('script');
+            s.src = src;
+            s.crossOrigin = 'anonymous';
+            s.onload = () => {
+              clearTimeout(timeout);
+              res();
+            };
+            s.onerror = (e) => {
+              clearTimeout(timeout);
+              rej(e || new Error(`Falha carregando ${name} via ${src}`));
+            };
+            document.head.appendChild(s);
+          });
+
+          console.log(`[DEBUG_QR] ✅ ${name} carregado por: ${src}`);
+          return;
+        } catch (err) {
+          lastError = err;
+          console.warn(`[DEBUG_QR] ⚠️ ${name} falhou em: ${src}`);
+        }
+      }
+
+      throw (lastError || new Error(`Falha ao carregar ${name}`));
+    }
+
+    // Carregamento sequencial de bibliotecas com timeout e retry
+    const loadLibraries = async () => {
+      // 1. Carregar jsQR (leve e rápido) - OBRIGATÓRIO
+      if (typeof jsQR === 'undefined') {
+        console.log('[DEBUG_QR] 📦 Carregando jsQR...');
+        await loadScriptWithFallback(
+          [
+            'https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js',
+            'https://unpkg.com/jsqr@1.4.0/dist/jsQR.min.js'
+          ],
+          isAppsScript ? 15000 : 10000,
+          'jsQR'
+        );
+      } else {
+        console.log('[DEBUG_QR] ✅ jsQR já carregado');
+      }
+
+      // 2. Carregar ZXing (mais robusto) - OPCIONAL
+      if (typeof ZXing === 'undefined') {
+        console.log('[DEBUG_QR] 📦 Carregando ZXing (detecção robusta para QR contaminados)...');
+        try {
+          await loadScriptWithFallback(
+            [
+              'https://unpkg.com/@zxing/library@0.20.0/umd/index.min.js',
+              'https://cdn.jsdelivr.net/npm/@zxing/library@0.20.0/umd/index.min.js'
+            ],
+            isAppsScript ? 20000 : 12000,
+            'ZXing'
+          );
+
+          if (typeof ZXing !== 'undefined' && ZXing.QRCodeReader) {
+            console.log('[DEBUG_QR] ✅ ZXing.QRCodeReader confirmado');
+          } else {
+            console.warn('[DEBUG_QR] ⚠️ ZXing carregou mas QRCodeReader não disponível');
+          }
+        } catch (e) {
+          console.warn('[DEBUG_QR] ⚠️ ZXing não disponível (Apps Script pode ter bloqueado):', e?.message);
+          console.log('[DEBUG_QR] ℹ️ Sistema continuará com jsQR + BarcodeDetector nativo');
+        }
+      } else {
+        console.log('[DEBUG_QR] ✅ ZXing já carregado');
+      }
+
+      // Sumário de bibliotecas disponíveis
+      const available = [];
+      if (typeof jsQR !== 'undefined') available.push('jsQR');
+      if (typeof ZXing !== 'undefined' && ZXing.QRCodeReader) available.push('ZXing');
+      if ('BarcodeDetector' in window) available.push('BarcodeDetector');
+      
+      console.log('[DEBUG_QR] 📚 Bibliotecas disponíveis:', available.join(', ') || 'NENHUMA (ERRO CRÍTICO)');
+      
+      if (available.length === 0) {
+        throw new Error('Nenhuma biblioteca QR disponível - verifique CSP/CORS');
+      }
+
+      await start();
+    };
+
+    loadLibraries().catch(e => {
+      console.error('[DEBUG_QR] ❌ Erro crítico ao carregar bibliotecas:', e);
+      console.error('[DEBUG_QR] 🔍 Verifique:', [
+        '1. Conexão com internet',
+        '2. Política CSP do Apps Script',
+        '3. Console do navegador para erros CORS',
+        '4. Se está em ambiente Apps Script, pode haver restrições'
+      ].join('\n'));
+      reject(e);
+    });
 
   });
+  
+  // Usar Promise.race para enforce timeout
+  return Promise.race([timeoutPromise, scanPromise]);
 }
 
 // ========================================================= //

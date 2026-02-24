@@ -52,6 +52,12 @@ function ensureNumber(value) {
     return isNaN(num) ? 0 : num;
 }
 
+const BACKEND_DEBUG = false;
+
+function appLog(message, force) {
+  if (force || BACKEND_DEBUG) Logger.log(message);
+}
+
 // Helper de logs de fluxo (isolado, pequeno)
 function logFlowMain(id, etapa, obj) {
     try {
@@ -784,13 +790,25 @@ function initializeRollAndGetId(revisorNome, qrData = null) {
  * ============================================================ */
 function checkActiveRoll(responsavel) {
   try {
-    Logger.log('[SERVER] Verificando rolo ativo para: ' + responsavel);
+    const reviewer = String(responsavel || '').trim();
+    if (!reviewer) return { has_active_roll: false };
+
+    const cache = CacheService.getScriptCache();
+    const cacheKey = 'ACTIVE_ROLL_' + reviewer;
+    const cached = cache.get(cacheKey);
+    if (cached) {
+      try {
+        return JSON.parse(cached);
+      } catch (_) {}
+    }
+
+    appLog('[SERVER] Verificando rolo ativo para: ' + reviewer);
 
     // ✅ CORRIGIDO: Usar 'INSPECOES' ao invés de 'rolos'
     const rows = DatabaseService.databaseQuery({
       collection: 'INSPECOES',
       where: [
-        { field: 'REVISOR', op: '==', value: responsavel },
+        { field: 'REVISOR', op: '==', value: reviewer },
         { field: 'STATUS_FINAL', op: '==', value: 'EM_REVISAO' }
       ]
     });
@@ -809,7 +827,7 @@ function checkActiveRoll(responsavel) {
         );
       }
 
-      Logger.log(
+      appLog(
         '[SERVER] Rolo ativo encontrado: ' +
           (active.REVISION_ID || active.ID_ROLO) +
           ' | elapsed=' +
@@ -817,7 +835,7 @@ function checkActiveRoll(responsavel) {
           's'
       );
 
-      return {
+      const result = {
         has_active_roll: true,
         roll_id: active.roll_id || active.ID_ROLO,
         review_id: active.review_id || active.REVISION_ID,
@@ -830,10 +848,15 @@ function checkActiveRoll(responsavel) {
         // Dados completos para repopular formulário
         data: active
       };
+
+      cache.put(cacheKey, JSON.stringify(result), 8);
+      return result;
     }
 
-    Logger.log('[SERVER] Nenhum rolo ativo para este revisor');
-    return { has_active_roll: false };
+    appLog('[SERVER] Nenhum rolo ativo para este revisor');
+    const emptyResult = { has_active_roll: false };
+    cache.put(cacheKey, JSON.stringify(emptyResult), 8);
+    return emptyResult;
   } catch (e) {
     Logger.log('[SERVER] ERRO checkActiveRoll: ' + e.message);
 
@@ -842,9 +865,7 @@ function checkActiveRoll(responsavel) {
       (e.message.includes('intervalo') ||
         e.message.includes('getLastRow'))
     ) {
-      Logger.log(
-        '[SERVER] ⚠️ Planilha vazia detectada. Retornando seguro.'
-      );
+      appLog('[SERVER] ⚠️ Planilha vazia detectada. Retornando seguro.', true);
       return { has_active_roll: false, error: 'empty_sheet' };
     }
 
@@ -1237,118 +1258,23 @@ function generateRevisionPDF_Web(idRolo) {
  * Esta é a ÚNICA fonte de verdade para esta operação
  */
 function getRollsByStatus_Web(payload) {
-  const startTime = new Date().getTime();
   try {
-    Logger.log('\n╔══════════════════════════════════════════════════════════╗');
-    Logger.log('║ [APP] getRollsByStatus_Web INICIADO                    ║');
-    Logger.log('╚══════════════════════════════════════════════════════════╝');
-    
-    // ETAPA 1: VALIDAÇÃO
-    Logger.log('\n[APP] 📥 ETAPA 1: VALIDAÇÃO DO PAYLOAD');
-    Logger.log('[APP] Tipo: ' + typeof payload);
-    Logger.log('[APP] JSON: ' + JSON.stringify(payload));
-    
-    if (!payload || typeof payload !== 'object') {
-      Logger.log('[APP] ❌ Payload inválido!');
-      return [];
-    }
-    Logger.log('[APP] ✅ Payload válido');
-    
-    // ETAPA 2: EXTRAÇÃO DO STATUS
-    Logger.log('\n[APP] 📋 ETAPA 2: EXTRAÇÃO DO STATUS');
-    const statusRaw = payload.status;
-    Logger.log('[APP] Valor recebido: "' + statusRaw + '"');
-    Logger.log('[APP] Tipo: ' + typeof statusRaw);
-    
-    const status = String(statusRaw || '').trim().toLowerCase();
-    Logger.log('[APP] Status normalizado: "' + status + '"');
-    Logger.log('[APP] Comprimento: ' + status.length);
-    
-    // ETAPA 3: CONSTRUÇÃO DA QUERY
-    Logger.log('\n[APP] 🔧 ETAPA 3: PREPARAÇÃO DA QUERY');
+    if (!payload || typeof payload !== 'object') return [];
+
+    const status = String(payload.status || '').trim().toLowerCase();
+    if (!status) return [];
+
     const queryParams = {
       collection: 'INSPECOES',
       where: [{ field: 'FASE_ATUAL', op: '==', value: status }]
     };
-    Logger.log('[APP] Collection: ' + queryParams.collection);
-    Logger.log('[APP] Field: ' + queryParams.where[0].field);
-    Logger.log('[APP] Value: "' + queryParams.where[0].value + '"');
-    
-    // ETAPA 4: EXECUÇÃO
-    Logger.log('\n[APP] ⚙️ ETAPA 4: EXECUTANDO QUERY');
-    const queryStart = new Date().getTime();
+
     const rolos = DatabaseService.databaseQuery(queryParams);
-    const queryTime = new Date().getTime() - queryStart;
-    Logger.log('[APP] Query completada em ' + queryTime + 'ms');
-    
-    // ETAPA 5: ANÁLISE DA RESPOSTA
-    Logger.log('\n[APP] 📊 ETAPA 5: ANÁLISE DA RESPOSTA');
-    Logger.log('[APP] Tipo: ' + typeof rolos);
-    Logger.log('[APP] É Array? ' + Array.isArray(rolos));
-    Logger.log('[APP] É null? ' + (rolos === null));
-    Logger.log('[APP] É undefined? ' + (rolos === undefined));
-    
-    let count = 0;
-    if (Array.isArray(rolos)) {
-      count = rolos.length;
-      Logger.log('[APP] ✅ Array.length = ' + count);
-    } else if (rolos && typeof rolos === 'object') {
-      Logger.log('[APP] ⚠️ Resultado é OBJETO, não array!');
-      count = 1;
-    } else {
-      Logger.log('[APP] ⚠️ Resultado é ' + typeof rolos);
-      count = 0;
-    }
-    
-    // ETAPA 6: AMOSTRAGEM
-    Logger.log('\n[APP] 📦 ETAPA 6: AMOSTRAGEM DE DADOS');
-    if (Array.isArray(rolos) && count > 0) {
-      Logger.log('[APP] Mostrando até 3 de ' + count + ' rolos:');
-      rolos.slice(0, 3).forEach(function(rolo, idx) {
-        Logger.log('\n[APP] [Rolo ' + (idx + 1) + ']');
-        Logger.log('[APP]   - FORNECEDOR: ' + (rolo.FORNECEDOR || 'N/A'));
-        Logger.log('[APP]   - ID_ROLO: ' + (rolo.ID_ROLO || 'N/A'));
-        Logger.log('[APP]   - FASE_ATUAL: ' + (rolo.FASE_ATUAL || 'N/A'));
-      });
-    } else if (count === 0) {
-      Logger.log('[APP] ⚠️ NENHUM ROLO ENCONTRADO para status: "' + status + '"');
-    }
-    
-    // ETAPA 7: RETORNO
-    Logger.log('\n[APP] 🔐 ETAPA 7: PREPARAÇÃO DO RETORNO');
-    let resultFinal = [];
-    
-    if (Array.isArray(rolos)) {
-      resultFinal = rolos;
-      Logger.log('[APP] ✅ Retornando array com ' + resultFinal.length + ' elementos');
-    } else if (rolos && typeof rolos === 'object') {
-      resultFinal = [rolos];
-      Logger.log('[APP] ⚠️ Objeto convertido para array');
-    } else {
-      resultFinal = [];
-      Logger.log('[APP] ℹ️ Retornando array vazio');
-    }
-    
-    // Garante serialização correta dos dados
-    const serializedResult = JSON.parse(JSON.stringify(resultFinal));
-    
-    const totalTime = new Date().getTime() - startTime;
-    Logger.log('\n╔══════════════════════════════════════════════════════════╗');
-    Logger.log('║ [APP] ✅ SUCESSO - RETORNANDO PARA FRONTEND              ║');
-    Logger.log('╚══════════════════════════════════════════════════════════╝');
-    Logger.log('[APP] Length: ' + serializedResult.length);
-    Logger.log('[APP] Tempo total: ' + totalTime + 'ms');
-    
-    return serializedResult;
-    
+    if (Array.isArray(rolos)) return JSON.parse(JSON.stringify(rolos));
+    if (rolos && typeof rolos === 'object') return [JSON.parse(JSON.stringify(rolos))];
+    return [];
   } catch (error) {
-    const elapsed = new Date().getTime() - startTime;
-    Logger.log('\n╔══════════════════════════════════════════════════════════╗');
-    Logger.log('║ [APP] ❌ ERRO CRÍTICO!                                  ║');
-    Logger.log('╚══════════════════════════════════════════════════════════╝');
-    Logger.log('[APP] Erro: ' + error.message);
-    Logger.log('[APP] Stack: ' + (error.stack || 'N/A'));
-    
+    Logger.log('[APP] ❌ Erro getRollsByStatus_Web: ' + error.message);
     return [];
   }
 }
@@ -1852,39 +1778,11 @@ function getReviewerMetricsRange_Web(startDate, endDate) {
  */
 function getKPIDashboardData() {
   try {
-    Logger.log('[APP] 📊 [KPI] Iniciando coleta consolidada de KPI Dashboard');
-    
-    // 1️⃣ BUSCAR ROLOS DE TODOS OS STATUS (padrão: usar fase_atual como chave)
-    const todasAsFases = [
-      'aprovado_revisor',
-      'aprovado_supervisor',
-      'aprovado_compras',
-      'em_estoque',
-      'aguardando_supervisor',
-      'em_revisao',
-      'em_compra',
-      'enviado_compras',
-      'negociando',
-      'reprovado_supervisor',
-      'reprovado_compras',
-      'finalizado_reprovado'
-    ];
-    
-    let allRollosConsolidados = [];
-    
-    todasAsFases.forEach(function(fase) {
-      try {
-        const queryParams = { collection: 'INSPECOES', where: [{ field: 'FASE_ATUAL', op: '==', value: fase }] };
-        const rolos = DatabaseService.databaseQuery(queryParams) || [];
-        const rolosArray = Array.isArray(rolos) ? rolos : (rolos ? [rolos] : []);
-        allRollosConsolidados = allRollosConsolidados.concat(rolosArray);
-        Logger.log('[APP] 📦 [KPI] Fase "' + fase + '": ' + rolosArray.length + ' rolos');
-      } catch (e) {
-        Logger.log('[APP] ⚠️ [KPI] Erro ao buscar fase "' + fase + '": ' + e.message);
-      }
-    });
-    
-    Logger.log('[APP] 📦 [KPI] Total consolidado: ' + allRollosConsolidados.length + ' rolos');
+    appLog('[APP] 📊 [KPI] Iniciando coleta consolidada de KPI Dashboard');
+
+    // 1️⃣ BUSCAR UMA VEZ TODA A COLEÇÃO (mais rápido que N consultas por fase)
+    const rawRows = DatabaseService.databaseQuery({ collection: 'INSPECOES' }) || [];
+    const allRollosConsolidados = Array.isArray(rawRows) ? rawRows : (rawRows ? [rawRows] : []);
     
     // 2️⃣ DATAS PARA FILTRO MENSAL
     const now = new Date();
@@ -1895,7 +1793,7 @@ function getKPIDashboardData() {
       'yyyy-MM-dd'
     );
     
-    Logger.log('[APP] 📅 [KPI] Periodo: ' + inicioMes + ' ate ' + dataAtual);
+    appLog('[APP] 📅 [KPI] Periodo: ' + inicioMes + ' ate ' + dataAtual);
     
     // 3️⃣ CONTAR POR FASE_ATUAL
     let aprovados = 0;
@@ -2002,11 +1900,7 @@ function getKPIDashboardData() {
       ? Math.round((soma_tempo_dias / tempo_count) * 10) / 10
       : 0;
 
-    Logger.log('[APP] ✅ [KPI] Periodo total: ' + total_periodo);
-    Logger.log('[APP] ❌ [KPI] Reprovacao: ' + taxa_reprovacao + '%');
-    Logger.log('[APP] ⚠️ [KPI] Defeitos/100m: ' + defeitos_100m);
-    Logger.log('[APP] ⏳ [KPI] Pendencias: ' + pendencias_pct + '%');
-    Logger.log('[APP] ⏱️ [KPI] Tempo medio: ' + tempo_medio_dias + 'd');
+    appLog('[APP] ✅ [KPI] Periodo total: ' + total_periodo);
     
     // 5️⃣ RETORNAR DADOS ESTRUTURADOS
     const resultado = {
@@ -2024,7 +1918,7 @@ function getKPIDashboardData() {
       }
     };
     
-    Logger.log('[APP] 📊 [KPI] Resultado final: ' + JSON.stringify(resultado));
+    appLog('[APP] 📊 [KPI] Resultado final: ' + JSON.stringify(resultado));
     return resultado;
     
   } catch (error) {

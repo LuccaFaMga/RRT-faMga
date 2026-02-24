@@ -41,6 +41,12 @@ var DatabaseService = (function () {
         FOTOS: {}
     };
 
+    const DB_DEBUG = false;
+
+    function dbLog(message, force) {
+        if (force || DB_DEBUG) Logger.log(message);
+    }
+
     function coerceToCorrectType(value, header, schema) {
         if (!schema || !header || !schema[header]) return value;
         const type = schema[header];
@@ -61,7 +67,7 @@ var DatabaseService = (function () {
     }
 
     function getSheetByName(sheetName) {
-        Logger.log(`[DB] getSheetByName chamada com: "${sheetName}"`);
+        dbLog(`[DB] getSheetByName chamada com: "${sheetName}"`);
         const ss = getSpreadsheet();
         const sheet = ss.getSheetByName(sheetName);
         if (!sheet) {
@@ -81,7 +87,7 @@ var DatabaseService = (function () {
             
             const sheetName = SHEET_TABS[collection] || collection;
             const sheet = getSheetByName(sheetName);
-            const headers = getHeadersFromSheet(sheetName);
+            const headers = getCachedHeaders(sheetName);
             const schema = SHEET_SCHEMAS[sheetName];
             
             const data = { ...payload };
@@ -114,7 +120,7 @@ var DatabaseService = (function () {
             sheet.appendRow(newRow);
             SpreadsheetApp.flush();
             
-            Logger.log(`[DB] ✅ Sucesso: ${sheetName} | ID: ${data.REVISION_ID || docId}`);
+            dbLog(`[DB] ✅ Sucesso: ${sheetName} | ID: ${data.REVISION_ID || docId}`);
             return { id: data.REVISION_ID || docId, ...data };
 
         } catch (error) {
@@ -455,12 +461,12 @@ var DatabaseService = (function () {
     function _get(collection, docId) {
   if (!docId) return null;
   const target = String(docId).trim();
-  Logger.log(`[DB] GET: ${collection}/${target}`);
+        dbLog(`[DB] GET: ${collection}/${target}`);
 
   const sheetName = SHEET_TABS[collection] || collection;
   if (!sheetName) throw new Error(`Coleção '${collection}' não mapeada.`);
 
-  const headers = getHeadersFromSheet(sheetName);
+    const headers = getCachedHeaders(sheetName);
   const data = getAllRowsFromSheet(sheetName);
 
   const revIdx  = headers.indexOf("REVISION_ID");
@@ -472,7 +478,7 @@ var DatabaseService = (function () {
       const row = data[i];
       const rowRevisionId = row[revIdx];
       if (rowRevisionId === target) {
-        Logger.log(`[DB] GET encontrado por REVISION_ID: ${target}`);
+                dbLog(`[DB] GET encontrado por REVISION_ID: ${target}`);
         return _rowToObject(row, headers, sheetName);
       }
     }
@@ -484,13 +490,13 @@ var DatabaseService = (function () {
       const row = data[i];
       const rowRoloId = row[roloIdx];
       if (rowRoloId === target) {
-        Logger.log(`[DB] GET encontrado por ID_ROLO (último): ${target}`);
+                dbLog(`[DB] GET encontrado por ID_ROLO (último): ${target}`);
         return _rowToObject(row, headers, sheetName);
       }
     }
   }
 
-  Logger.log(`[DB] GET não encontrado: ${target}`);
+    dbLog(`[DB] GET não encontrado: ${target}`);
   return null;
 }
 
@@ -498,7 +504,7 @@ var DatabaseService = (function () {
   if (!docId) throw new Error("_update requires docId");
   const target = String(docId).trim();
 
-  Logger.log(`[DB] UPDATE: ${collection}/${target} com ${Object.keys(payload || {}).length} campos`);
+    dbLog(`[DB] UPDATE: ${collection}/${target} com ${Object.keys(payload || {}).length} campos`);
 
   const lock = LockService.getScriptLock();
   try {
@@ -508,7 +514,7 @@ var DatabaseService = (function () {
     if (!sheetName) throw new Error(`Coleção '${collection}' não mapeada.`);
 
     const sheet = getSheetByName(sheetName);
-    const headers = getHeadersFromSheet(sheetName);
+    const headers = getCachedHeaders(sheetName);
     const data = getAllRowsFromSheet(sheetName);
 
     const headerIndexMap = {};
@@ -575,7 +581,7 @@ var DatabaseService = (function () {
     sheet.getRange(rowIndex + 2, 1, 1, rowFound.length).setValues([rowFound]);
     SpreadsheetApp.flush();
 
-    Logger.log(`[DB] ✅ UPDATE sucesso: ${target}`);
+    dbLog(`[DB] ✅ UPDATE sucesso: ${target}`);
     return _rowToObject(rowFound, headers, sheetName);
 
   } catch (error) {
@@ -589,13 +595,13 @@ var DatabaseService = (function () {
 
     function _delete(collection, docId) {
   if (!docId) throw new Error("_delete requires docId");
-  Logger.log(`[DB] DELETE: ${collection}/${docId}`);
+        dbLog(`[DB] DELETE: ${collection}/${docId}`);
 
   const sheetName = SHEET_TABS[collection] || collection;
   if (!sheetName) throw new Error(`Coleção '${collection}' não mapeada.`);
 
   const sheet = getSheetByName(sheetName);
-  const headers = getHeadersFromSheet(sheetName);
+    const headers = getCachedHeaders(sheetName);
   const data = getAllRowsFromSheet(sheetName);
 
   const revisionIdIdx = headers.indexOf("REVISION_ID");
@@ -608,7 +614,7 @@ var DatabaseService = (function () {
 
     if (rowRevisionId === docId || rowRoloId === docId) {
       sheet.deleteRow(i + 2);
-      Logger.log(`[DB] DELETE sucesso: ${docId}`);
+            dbLog(`[DB] DELETE sucesso: ${docId}`);
       return { id: docId, status: "DELETED" };
     }
   }
@@ -683,13 +689,13 @@ var DatabaseService = (function () {
     function _query(q) {
         if (!q || !q.collection) return [];
         
-        Logger.log(`[DB] QUERY: ${q.collection} com ${(q.where || []).length} filtros`);
+        dbLog(`[DB] QUERY: ${q.collection} com ${(q.where || []).length} filtros`);
         // Suporta tanto chave de SHEET_TABS quanto nome da aba diretamente
         const sheetName = SHEET_TABS[q.collection] || q.collection;
         if (!sheetName) throw new Error(`Coleção '${q.collection}' não mapeada.`);
 
         const sheet = getSheetByName(sheetName);
-        const headers = getHeadersFromSheet(sheetName);
+        const headers = getCachedHeaders(sheetName);
         const data = getAllRowsFromSheet(sheetName);
 
         // Aplicar filtros onde (JavaScript-based filtering)
@@ -753,7 +759,7 @@ var DatabaseService = (function () {
         }
 
         const results = filtered.map(row => _rowToObject(row, headers, sheetName));
-        Logger.log(`[DB] QUERY retornou ${results.length} resultados`);
+        dbLog(`[DB] QUERY retornou ${results.length} resultados`);
         return results;
     }
 
@@ -859,14 +865,16 @@ function insertStructuredData(payload) {
     try {
         lock.waitLock(20000);
         
-        // 🔍 DEBUG: Log IMEDIATAMENTE após receber payload
-        Logger.log('[STRUCTURED] 🔵 PAYLOAD RECEBIDO NA BACKEND:');
-        Logger.log('[STRUCTURED] - rolo.localizacao: ' + rolo.localizacao);
-        Logger.log('[STRUCTURED] - rolo.loc: ' + rolo.loc);
-        Logger.log('[STRUCTURED] - rolo.metros_revisado: ' + rolo.metros_revisado);
-        Logger.log('[STRUCTURED] - rolo.revised_meters: ' + rolo.revised_meters);
-        Logger.log('[STRUCTURED] - rolo.tipo_tecido: ' + rolo.tipo_tecido);
-        Logger.log('[STRUCTURED] - rolo.est_tc: ' + rolo.est_tc);
+        // 🔍 DEBUG opcional (desligado em produção)
+        if (DB_DEBUG) {
+            Logger.log('[STRUCTURED] 🔵 PAYLOAD RECEBIDO NA BACKEND:');
+            Logger.log('[STRUCTURED] - rolo.localizacao: ' + rolo.localizacao);
+            Logger.log('[STRUCTURED] - rolo.loc: ' + rolo.loc);
+            Logger.log('[STRUCTURED] - rolo.metros_revisado: ' + rolo.metros_revisado);
+            Logger.log('[STRUCTURED] - rolo.revised_meters: ' + rolo.revised_meters);
+            Logger.log('[STRUCTURED] - rolo.tipo_tecido: ' + rolo.tipo_tecido);
+            Logger.log('[STRUCTURED] - rolo.est_tc: ' + rolo.est_tc);
+        }
         
         // ============================================================
         // 🔑 NORMALIZAÇÃO E VALIDAÇÃO DE CAMPOS ESSENCIAIS
@@ -877,12 +885,12 @@ function insertStructuredData(payload) {
         const productId = String(rolo.product_id || rolo.produto_id || "").trim();
         const revisorName = String(rolo.revisor_nome || rolo.revisor || "").trim();
         
-        Logger.log(`[STRUCTURED] 📋 VALIDANDO PAYLOAD:`);
-        Logger.log(`  supplier_id: ${supplierId}`);
-        Logger.log(`  supplier_name: ${supplierName}`);
-        Logger.log(`  product_id: ${productId}`);
-        Logger.log(`  nf: ${nf}`);
-        Logger.log(`  revisor: ${revisorName}`);
+        dbLog(`[STRUCTURED] 📋 VALIDANDO PAYLOAD:`);
+        dbLog(`  supplier_id: ${supplierId}`);
+        dbLog(`  supplier_name: ${supplierName}`);
+        dbLog(`  product_id: ${productId}`);
+        dbLog(`  nf: ${nf}`);
+        dbLog(`  revisor: ${revisorName}`);
         
         // Validações críticas
         if (!supplierId) throw new Error("supplier_id (fornecedor_id) é obrigatório");
@@ -894,7 +902,7 @@ function insertStructuredData(payload) {
         // 🆔 GERAÇÃO DO REVISION_ID (único e consistente)
         // ============================================================
         const revisionId = generateShortRevisionId(rolo);
-        Logger.log(`[STRUCTURED] 🆔 Revision ID: ${revisionId}`);
+        dbLog(`[STRUCTURED] 🆔 Revision ID: ${revisionId}`);
         
         // ============================================================
         // 📦 MAPEAMENTO EXPLÍCITO COLUNA ➜ VALOR (ROBUSTEZ MÁXIMA)
@@ -958,7 +966,7 @@ function insertStructuredData(payload) {
                     break;
                 case "LOCALIZACAO":
                     value = String(rolo.loc || rolo.localizacao || "").trim();
-                    Logger.log(`[STRUCTURED] LOCALIZACAO CASE: rolo.loc='${rolo.loc}' | rolo.localizacao='${rolo.localizacao}' | FINAL VALUE='${value}'`);
+                    dbLog(`[STRUCTURED] LOCALIZACAO CASE: rolo.loc='${rolo.loc}' | rolo.localizacao='${rolo.localizacao}' | FINAL VALUE='${value}'`);
                     break;
                     
                 // 📏 DIMENSÕES DO TECIDO (QR CAMPOS 9-10)
@@ -994,11 +1002,11 @@ function insertStructuredData(payload) {
                         if (!metrosRev || metrosRev === 0) {
                             metrosRev = ensureNumber(rolo.wid || rolo.metros_fornecedor || 0);
                             if (metrosRev > 0) {
-                                Logger.log(`[STRUCTURED] ⚠️ METROS_REVISADO estava zero, usando METROS_FORNECEDOR: ${metrosRev}`);
+                                dbLog(`[STRUCTURED] ⚠️ METROS_REVISADO estava zero, usando METROS_FORNECEDOR: ${metrosRev}`);
                             }
                         }
                     }
-                    Logger.log(`[STRUCTURED] METROS_REVISADO CASE: tipo='${tipoTecido}' | metros_revisado='${rolo.metros_revisado}' | revised_meters='${rolo.revised_meters}' | FINAL VALUE=${metrosRev}`);
+                    dbLog(`[STRUCTURED] METROS_REVISADO CASE: tipo='${tipoTecido}' | metros_revisado='${rolo.metros_revisado}' | revised_meters='${rolo.revised_meters}' | FINAL VALUE=${metrosRev}`);
                     value = metrosRev;
                     break;
                 case "PESO_KG":
@@ -1073,7 +1081,7 @@ function insertStructuredData(payload) {
         });
         
         if (existingRevision && existingRevision.length > 0) {
-            Logger.log(`[STRUCTURED] ⚠️ Revisão ${revisionId} já existe. Ignorando duplicação.`);
+            dbLog(`[STRUCTURED] ⚠️ Revisão ${revisionId} já existe. Ignorando duplicação.`, true);
             return makeServiceResponse(true, { revision_id: revisionId, duplicate: true }, null, { time: new Date().getTime() - start });
         }
 
@@ -1085,14 +1093,13 @@ function insertStructuredData(payload) {
         // 1️⃣ INSPEÇÃO (linha principal)
         _batchAppend(SHEET_TABS.INSPECOES, [row]);
         metrics.written.INSPECOES = 1;
-        Logger.log(`[STRUCTURED] ✅ INSPEÇÃO gravada: ${revisionId}`);
+        dbLog(`[STRUCTURED] ✅ INSPEÇÃO gravada: ${revisionId}`);
         
         // 2️⃣ DEFEITOS (uma linha por item)
         if (payload.defeitos && Array.isArray(payload.defeitos)) {
             const defeitosValidos = payload.defeitos.filter(d => d.tipo || d.tipo_defeito);
-            
-            defeitosValidos.forEach(defeito => {
-                const defectRow = [
+
+            const defectRows = defeitosValidos.map(defeito => [
                     revisionId,
                     String(defeito.tipo || defeito.tipo_defeito || "").trim(),
                     ensureNumber(defeito.metro_inicial || defeito.metragem_inicial || 0),
@@ -1101,48 +1108,55 @@ function insertStructuredData(payload) {
                     String(defeito.zona || defeito.posicao_largura || "").trim(),
                     String(defeito.observacoes || "").trim(),
                     nowBrasilia()
-                ];
-                _batchAppend(SHEET_TABS.DEFEITOS, [defectRow]);
-                metrics.written.defeitos++;
-            });
-            Logger.log(`[STRUCTURED] ✅ ${metrics.written.defeitos} DEFEITOS gravados`);
+                ]);
+
+            if (defectRows.length > 0) {
+                _batchAppend(SHEET_TABS.DEFEITOS, defectRows);
+                metrics.written.defeitos = defectRows.length;
+            }
+            dbLog(`[STRUCTURED] ✅ ${metrics.written.defeitos} DEFEITOS gravados`);
         }
         
         // 3️⃣ FOTOS (uma linha por URL)
         if (payload.fotos && Array.isArray(payload.fotos)) {
+            const photoRows = [];
+
             payload.fotos.forEach(foto => {
                 const url = String(foto.url || foto.foto_url || foto.url_foto || "").trim();
                 if (url && url.length > 0) {
-                    const photoRow = [
+                    photoRows.push([
                         revisionId,
                         url,
                         String(foto.tipo || foto.tipo_foto || "GERAL").trim(),
                         nowBrasilia()
-                    ];
-                    _batchAppend(SHEET_TABS.FOTOS, [photoRow]);
-                    metrics.written.fotos++;
+                    ]);
                 }
             });
-            Logger.log(`[STRUCTURED] ✅ ${metrics.written.fotos} FOTOS gravadas`);
+
+            if (photoRows.length > 0) {
+                _batchAppend(SHEET_TABS.FOTOS, photoRows);
+                metrics.written.fotos = photoRows.length;
+            }
+            dbLog(`[STRUCTURED] ✅ ${metrics.written.fotos} FOTOS gravadas`);
         }
         
         // 4️⃣ TEMPOS (se disponível)
         if (payload.tempos && Array.isArray(payload.tempos)) {
-            Logger.log(`[STRUCTURED] 📋 TEMPOS RECEBIDOS: ${payload.tempos.length} registros`);
-            payload.tempos.forEach((tempo, idx) => {
-                const tempoRow = [
+            dbLog(`[STRUCTURED] 📋 TEMPOS RECEBIDOS: ${payload.tempos.length} registros`);
+            const tempoRows = payload.tempos.map((tempo) => [
                     revisionId,
                     String(tempo.event || "").trim(),
                     String(tempo.timestamp || nowBrasilia()).trim(),
                     ensureNumber(tempo.duracao_seg || tempo.duration || 0)
-                ];
-                Logger.log(`[STRUCTURED] TEMPO[${idx}]: event='${tempo.event}' | timestamp='${tempo.timestamp}' | duracao='${tempo.duracao_seg}'`);
-                _batchAppend(SHEET_TABS.TEMPOS_LOG, [tempoRow]);
-                metrics.written.tempos++;
-            });
-            Logger.log(`[STRUCTURED] ✅ ${metrics.written.tempos} TEMPOS gravados`);
+                ]);
+
+            if (tempoRows.length > 0) {
+                _batchAppend(SHEET_TABS.TEMPOS_LOG, tempoRows);
+                metrics.written.tempos = tempoRows.length;
+            }
+            dbLog(`[STRUCTURED] ✅ ${metrics.written.tempos} TEMPOS gravados`);
         } else {
-            Logger.log(`[STRUCTURED] ⚠️ TEMPOS NÃO RECEBIDO ou não é array: ${typeof payload.tempos}`);
+            dbLog(`[STRUCTURED] ⚠️ TEMPOS NÃO RECEBIDO ou não é array: ${typeof payload.tempos}`);
         }
         
         // 5️⃣ AUDITORIA - Log de criação da revisão
@@ -1179,8 +1193,8 @@ function insertStructuredData(payload) {
         
         SpreadsheetApp.flush();
         
-        Logger.log(`[STRUCTURED] ✨ SUCESSO COMPLETO: ${revisionId}`);
-        Logger.log(`  INSPECOES: ${metrics.written.INSPECOES} | DEFEITOS: ${metrics.written.defeitos} | FOTOS: ${metrics.written.fotos} | TEMPOS: ${metrics.written.tempos}`);
+        dbLog(`[STRUCTURED] ✨ SUCESSO COMPLETO: ${revisionId}`, true);
+        dbLog(`  INSPECOES: ${metrics.written.INSPECOES} | DEFEITOS: ${metrics.written.defeitos} | FOTOS: ${metrics.written.fotos} | TEMPOS: ${metrics.written.tempos}`, true);
         
         return makeServiceResponse(true, { 
             revision_id: revisionId, 
