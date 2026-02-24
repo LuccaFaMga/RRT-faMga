@@ -180,12 +180,7 @@ function doPost(e) {
             case "getRollsByStatus": response = getRollsByStatus_Web(payload); break;
             case "processSupervisorDecision": response = processSupervisorDecision_Web(payload); break;
             case "generateRevisionPDF": response = generateRevisionPDF_Web(payload.idRolo); break;
-            case "processarDecisaoCompras": response = processarDecisaoCompras_Web(payload); break;
-            
-            // Ações de Unidades
-            case "getUnidades": response = getUnidades_Web(); break;
-            case "addUnidade": response = addUnidade_Web(payload); break;
-            case "movimentarUnidade": response = movimentarUnidade_Web(payload); break;
+            case "processarDecisaoCompras": response = processarDecisaoComprasV2_Web(payload); break;
 
             case "stock_create":
             case "stock_update":
@@ -328,6 +323,159 @@ function handleStockAction(payload) {
   }
     if (action === "stock_delete") return DatabaseService.rolls.delete(id);
     throw new Error(`Ação desconhecida: ${action}`);
+}
+
+function registrarSolicitacaoCorte_Web(payload) {
+  try {
+    const id = String(payload?.id || '').trim();
+    const opSolicitada = String(payload?.op_solicitada || '').trim();
+    const quantidadeSolicitada = Number(payload?.quantidade_solicitada || 0);
+    const dataCorte = String(payload?.data_corte || '').trim();
+
+    if (!id) throw new Error('ID do tecido é obrigatório');
+    if (!opSolicitada) throw new Error('OP solicitada é obrigatória');
+    if (!quantidadeSolicitada || isNaN(quantidadeSolicitada) || quantidadeSolicitada <= 0) {
+      throw new Error('Quantidade solicitada inválida');
+    }
+    if (!dataCorte) throw new Error('Data de corte é obrigatória');
+
+    const rolo = DatabaseService.rolls.get(id);
+    if (!rolo) throw new Error('Tecido não encontrado em estoque');
+
+    const produtoId =
+      rolo.PRODUTO_ID ||
+      rolo.produto_id ||
+      rolo.PRODUCT_ID ||
+      rolo.product_id ||
+      rolo.ID_ROLO ||
+      rolo.id_do_rolo ||
+      '';
+
+    const fornecedor =
+      rolo.FORNECEDOR ||
+      rolo.fornecedor ||
+      rolo.fornecedor_nome ||
+      rolo.supplier_nm ||
+      rolo.supplier_name ||
+      '';
+
+    const usuario = Session.getActiveUser().getEmail() || 'sistema';
+
+    const detalhes = {
+      id: id,
+      produto_id: String(produtoId || '').trim(),
+      fornecedor: String(fornecedor || '').trim(),
+      op_solicitada: opSolicitada,
+      quantidade_solicitada: quantidadeSolicitada,
+      data_corte: dataCorte
+    };
+
+    DatabaseService.audit.add({
+      acao: 'corte_tecido_solicitado',
+      usuario: usuario,
+      detalhes: detalhes
+    });
+
+    return {
+      status: 'SUCESSO',
+      id,
+      op_solicitada: opSolicitada,
+      quantidade_solicitada: quantidadeSolicitada,
+      data_corte: dataCorte
+    };
+  } catch (error) {
+    Logger.log('[APP] ❌ Erro em registrarSolicitacaoCorte_Web: ' + error.message);
+    return { status: 'ERRO', message: error.message };
+  }
+}
+
+function parseDateOnly_(value, endOfDay) {
+  const str = String(value || '').trim();
+  if (!str) return null;
+
+  // yyyy-mm-dd
+  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+    const d = new Date(str + (endOfDay ? 'T23:59:59' : 'T00:00:00'));
+    return isNaN(d.getTime()) ? null : d;
+  }
+
+  // dd/mm/yyyy
+  const br = str.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (br) {
+    const d = new Date(Number(br[3]), Number(br[2]) - 1, Number(br[1]), endOfDay ? 23 : 0, endOfDay ? 59 : 0, endOfDay ? 59 : 0);
+    return isNaN(d.getTime()) ? null : d;
+  }
+
+  const parsed = new Date(str);
+  if (isNaN(parsed.getTime())) return null;
+  if (endOfDay) parsed.setHours(23, 59, 59, 999); else parsed.setHours(0, 0, 0, 0);
+  return parsed;
+}
+
+function getSolicitacoesCorte_Web(filtersOrLimit) {
+  try {
+    const params = (filtersOrLimit && typeof filtersOrLimit === 'object')
+      ? filtersOrLimit
+      : { limit: filtersOrLimit };
+
+    const max = Math.max(1, Math.min(Number(params.limit || 50), 200));
+    const opFiltro = String(params.op || '').trim().toLowerCase();
+    const dataInicio = parseDateOnly_(params.data_inicio, false);
+    const dataFim = parseDateOnly_(params.data_fim, true);
+
+    const logs = DatabaseService.databaseQuery({
+      collection: 'AUDIT',
+      where: [{ field: 'acao', op: '==', value: 'corte_tecido_solicitado' }],
+      orderBy: [{ field: 'timestamp', direction: 'desc' }],
+      limit: max
+    });
+
+    const result = (Array.isArray(logs) ? logs : []).map((row) => {
+      const detalhesRaw = row.detalhes || row.DETALHES || {};
+      let detalhes = {};
+      if (typeof detalhesRaw === 'string') {
+        try {
+          detalhes = JSON.parse(detalhesRaw);
+        } catch (e) {
+          detalhes = {};
+        }
+      } else if (detalhesRaw && typeof detalhesRaw === 'object') {
+        detalhes = detalhesRaw;
+      }
+
+      return {
+        id: String(detalhes.id || detalhes.id_rolo || '').trim(),
+        produto_id: String(detalhes.produto_id || '').trim(),
+        fornecedor: String(detalhes.fornecedor || '').trim(),
+        op_solicitada: String(detalhes.op_solicitada || '').trim(),
+        quantidade_solicitada: Number(detalhes.quantidade_solicitada || 0),
+        data_corte: String(detalhes.data_corte || '').trim(),
+        usuario: String(row.usuario || row.USUARIO || '').trim(),
+        timestamp: String(row.timestamp || row.TIMESTAMP || '').trim()
+      };
+    });
+
+    const filtered = result.filter((item) => {
+      if (opFiltro) {
+        const opValue = String(item.op_solicitada || '').toLowerCase();
+        if (opValue.indexOf(opFiltro) === -1) return false;
+      }
+
+      if (dataInicio || dataFim) {
+        const corteDate = parseDateOnly_(item.data_corte, false);
+        if (!corteDate) return false;
+        if (dataInicio && corteDate < dataInicio) return false;
+        if (dataFim && corteDate > dataFim) return false;
+      }
+
+      return true;
+    });
+
+    return filtered;
+  } catch (error) {
+    Logger.log('[APP] ❌ Erro em getSolicitacoesCorte_Web: ' + error.message);
+    return [];
+  }
 }
 
 /* ============================================================
@@ -975,28 +1123,62 @@ function processSupervisorDecision_Web(payload) {
       Logger.log(`[SUPERVISOR] ✅ Agora em: ${result.para}`);
     }
     
-    // Se reprovado, gera PDF para Compras e envia email
+    // Se reprovado, marca caso em compras + gera PDF + envia email
     let pdfUrl = null;
     if (decisao.toLowerCase() === 'reprovado') {
+      try {
+        DatabaseService.rolls.update(id_do_rolo, {
+          compras_status_case: 'pendente',
+          motivo_reprovacao_supervisor: observacoes || '',
+          categoria_defeito_supervisor: categoria_defeito || '',
+          acao_recomendada_supervisor: acao_recomendada || ''
+        });
+      } catch (markErr) {
+        Logger.log(`[SUPERVISOR] ⚠️ Falha ao marcar caso de compras: ${markErr.message}`);
+      }
+
       Logger.log(`[SUPERVISOR] 📄 Gerando PDF de reprovação...`);
       pdfUrl = generateReprovePDF_Web(id_do_rolo, observacoes);
       Logger.log(`[SUPERVISOR] ✅ PDF gerado: ${pdfUrl}`);
+
+      try {
+        if (pdfUrl) {
+          DatabaseService.rolls.update(id_do_rolo, {
+            pdf_reprovacao_url: String(pdfUrl),
+            pdf_reprovacao_status: 'pronto',
+            pdf_reprovacao_updated_at: new Date().toISOString()
+          });
+        } else {
+          DatabaseService.rolls.update(id_do_rolo, {
+            pdf_reprovacao_status: 'pendente',
+            pdf_reprovacao_updated_at: new Date().toISOString()
+          });
+        }
+      } catch (pdfMarkErr) {
+        Logger.log(`[SUPERVISOR] ⚠️ Falha ao persistir status do PDF: ${pdfMarkErr.message}`);
+      }
       
       // Busca dados do rolo para enviar email
       Logger.log(`[SUPERVISOR] 📧 Preparando email para Compras...`);
       try {
-        const rollData = DatabaseService.databaseQuery({
-          collection: "INSPECOES",
-          where: [{ field: "ID_ROLO", op: "==", value: id_do_rolo }]
-        });
-        
-        if (rollData && rollData.length > 0) {
-          const roll = rollData[0];
-          const defeitos = roll.defeitos ? JSON.parse(typeof roll.defeitos === "string" ? roll.defeitos : "[]") : [];
-          
-          // Envia email para Compras
-          const emailOk = sendComprasEmail(roll, defeitos, { 
-            relatorioFileId: pdfUrl ? pdfUrl.split('/d/')[1]?.split('/')[0] : null,
+        const roll = DatabaseService.rolls.get(id_do_rolo);
+        if (roll) {
+          const defeitosRaw = roll.defeitos || roll.DEFEITOS || [];
+          const defeitos = Array.isArray(defeitosRaw)
+            ? defeitosRaw
+            : (typeof defeitosRaw === 'string' ? (JSON.parse(defeitosRaw || '[]') || []) : []);
+
+          const relatorioFileId = (function (url) {
+            const raw = String(url || '');
+            if (!raw) return null;
+            const m1 = raw.match(/\/d\/([a-zA-Z0-9_-]+)/);
+            if (m1 && m1[1]) return m1[1];
+            const m2 = raw.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+            return m2 && m2[1] ? m2[1] : null;
+          })(pdfUrl);
+
+          const emailOk = sendComprasEmail(roll, defeitos, {
+            relatorioFileId,
             pdfUrl: pdfUrl,
             pdfBlob: null
           });
@@ -1053,19 +1235,40 @@ function generateReprovePDF_Web(idRolo, motivo) {
     Motivo: ${motivo || 'Não especificado'}
     `);
     
-    // Busca dados do rolo
+    // Busca dados do rolo (aceita REVISION_ID ou ID_ROLO)
     Logger.log(`[PDF] 🔍 Buscando dados do rolo: ${idRolo}`);
-    const dados = DatabaseService.databaseQuery({
-      collection: "INSPECOES",
-      where: [{ field: "ID_ROLO", op: "==", value: idRolo }]
-    });
-    
-    if (!dados || dados.length === 0) {
+    const roll = DatabaseService.rolls.get(idRolo);
+    if (!roll) {
       throw new Error(`Rolo ${idRolo} não encontrado na planilha`);
     }
-    
+
     Logger.log(`[PDF] ✅ Dados do rolo carregados`);
-    const roll = dados[0];
+
+    const defeitosRaw = roll.defeitos || roll.DEFEITOS || [];
+    const defeitos = Array.isArray(defeitosRaw)
+      ? defeitosRaw
+      : (typeof defeitosRaw === 'string' ? (JSON.parse(defeitosRaw || '[]') || []) : []);
+
+    // Tentativa preferencial: gerar PDF usando template oficial (DocumentService)
+    try {
+      if (typeof DocumentService !== 'undefined' && DocumentService.generateAllDocs) {
+        const docs = DocumentService.generateAllDocs(
+          { ...roll, id_do_rolo: String(roll.id_do_rolo || roll.ID_ROLO || idRolo) },
+          defeitos,
+          [],
+          'compras'
+        );
+
+        if (docs && docs.relatorioFileId) {
+          const file = DriveApp.getFileById(docs.relatorioFileId);
+          const templatePdfUrl = file.getUrl();
+          Logger.log('[PDF] ✅ PDF gerado via template oficial (compras)');
+          return templatePdfUrl;
+        }
+      }
+    } catch (templateErr) {
+      Logger.log('[PDF] ⚠️ Falha no template oficial, aplicando fallback: ' + templateErr.message);
+    }
     
     try {
       Logger.log(`[PDF] 📁 Preparando pastas do Drive...`);
@@ -1091,22 +1294,33 @@ function generateReprovePDF_Web(idRolo, motivo) {
       
       body.appendParagraph("");
       
+      const rollIdView = String(roll.id_do_rolo || roll.ID_ROLO || roll.roll_id || idRolo || "N/A");
+      const reviewIdView = String(roll.revision_id || roll.REVISION_ID || roll.review_id || "N/A");
+      const fornecedorView = String(roll.fornecedor || roll.FORNECEDOR || roll.supplier_nm || "N/A");
+      const produtoView = String(roll.produto_id || roll.PRODUTO_ID || roll.product_id || "N/A");
+      const loteView = String(roll.lote || roll.LOTE || roll.lot || "N/A");
+      const localizacaoView = String(roll.localizacao || roll.LOCALIZACAO || roll.loc || "N/A");
+      const tipoTecidoView = String(roll.tipo_tecido || roll.TIPO_TECIDO || "N/A");
+      const larguraView = String(roll.largura_cm || roll.LARGURA_CM || roll.len || "N/A");
+      const metrosFornecedorView = String(roll.metros_fornecedor || roll.METROS_FORNECEDOR || roll.metros_maquina || roll.METROS_MAQUINA || roll.wid || "N/A");
+      const corView = String(roll.cor || roll.COR || roll.color_id || roll.COLOR_ID || "N/A");
+
       // Informações do rolo
       body.appendParagraph("INFORMAÇÕES DO ROLO")
         .setHeading(DocumentApp.ParagraphHeading.HEADING2);
       
       const table1 = body.appendTable([
         ["Campo", "Valor"],
-        ["ID do Rolo", String(roll.id_do_rolo || "N/A")],
-        ["Revision ID", String(roll.revision_id || "N/A")],
-        ["Fornecedor", String(roll.fornecedor || "N/A")],
-        ["Produto ID", String(roll.produto_id || "N/A")],
-        ["Lote", String(roll.lote || "N/A")],
-        ["Localização", String(roll.localizacao || "N/A")],
-        ["Tipo de Tecido", String(roll.tipo_tecido || "N/A")],
-        ["Largura (cm)", String(roll.largura_cm || "N/A")],
-        ["Metros Fornecedor", String(roll.metros_maquina || "N/A")],
-        ["Cor", String(roll.cor || "N/A")]
+        ["ID do Rolo", rollIdView],
+        ["Revision ID", reviewIdView],
+        ["Fornecedor", fornecedorView],
+        ["Produto ID", produtoView],
+        ["Lote", loteView],
+        ["Localização", localizacaoView],
+        ["Tipo de Tecido", tipoTecidoView],
+        ["Largura (cm)", larguraView],
+        ["Metros Fornecedor", metrosFornecedorView],
+        ["Cor", corView]
       ]);
       
       // Formatação da tabela
@@ -1131,18 +1345,22 @@ function generateReprovePDF_Web(idRolo, motivo) {
       body.appendParagraph("");
       
       // Defeitos encontrados
-      const defeitos = roll.defeitos ? JSON.parse(typeof roll.defeitos === "string" ? roll.defeitos : "[]") : [];
       if (defeitos.length > 0) {
         body.appendParagraph("DEFEITOS ENCONTRADOS")
           .setHeading(DocumentApp.ParagraphHeading.HEADING2);
         
         const defectsTable = [["Tipo", "Metragem", "Gravidade", "Observações"]];
         defeitos.forEach(d => {
+          const tipo = String(d.tipo || d.tipo_defeito || d.TIPO || 'N/A');
+          const metroInicial = String(d.metro_inicial || d.metragem_inicial || d.METRO_INICIAL || 0);
+          const metroFinal = String(d.metro_final || d.metragem_final || d.METRO_FINAL || 0);
+          const gravidade = String(d.gravidade || d.GRAVIDADE || 'N/A');
+          const obs = String(d.observacoes || d.OBSERVACOES || '-');
           defectsTable.push([
-            String(d.tipo_defeito || "N/A"),
-            `${String(d.metragem_inicial || 0)} - ${String(d.metragem_final || 0)}m`,
-            String(d.gravidade || "N/A"),
-            String(d.observacoes || "-")
+            tipo,
+            `${metroInicial} - ${metroFinal}m`,
+            gravidade,
+            obs
           ]);
         });
         
@@ -1280,249 +1498,10 @@ function getRollsByStatus_Web(payload) {
 }
 
 /* ============================================================
- *   🧦 CONTROLE DE UNIDADES (GOLA, PUNHO)
- * ============================================================ */
-
-const UNIDADES_SHEETS = ['GOLA', 'PUNHO'];
-const UNIDADES_HEADERS = [
-  'ID',
-  'TIPO',
-  'NOTA_FISCAL',
-  'CODIGO',
-  'REFERENCIA',
-  'TAMANHO',
-  'COR',
-  'QUANTIDADE',
-  'VALOR_UNITARIO',
-  'ESTOQUE_MINIMO',
-  'DATA_CRIACAO',
-  'ULTIMA_MOVIMENTACAO',
-  'CRIADO_POR'
-];
-
-function getUnidadesSpreadsheet_() {
-  return SpreadsheetApp.openById(CONFIG.IDS.SHEET_ID);
-}
-
-function normalizeHeader_(value) {
-  return String(value || '').trim().toUpperCase();
-}
-
-function ensureUnidadesSheet_(sheetName) {
-  const ss = getUnidadesSpreadsheet_();
-  let sheet = ss.getSheetByName(sheetName);
-  if (!sheet) {
-    sheet = ss.insertSheet(sheetName);
-  }
-
-  const headerRange = sheet.getRange(1, 1, 1, UNIDADES_HEADERS.length);
-  const existingHeaders = headerRange.getValues()[0].map(normalizeHeader_);
-  const hasAllHeaders = UNIDADES_HEADERS.every((h, i) => existingHeaders[i] === h);
-  if (!hasAllHeaders) {
-    headerRange.setValues([UNIDADES_HEADERS]);
-  }
-
-  return sheet;
-}
-
-function getHeaderMap_(headers) {
-  const map = {};
-  headers.forEach((h, index) => {
-    map[normalizeHeader_(h)] = index;
-  });
-  return map;
-}
-
-function readUnidadesFromSheet_(sheetName) {
-  const sheet = ensureUnidadesSheet_(sheetName);
-  const data = sheet.getDataRange().getValues();
-  if (data.length < 2) return [];
-
-  const headers = data[0];
-  const headerMap = getHeaderMap_(headers);
-  const rows = data.slice(1);
-
-  return rows
-    .filter((row) => row.some((cell) => String(cell).trim() !== ''))
-    .map((row) => {
-      const getValue = (key) => row[headerMap[key]];
-      return {
-        id: String(getValue('ID') || ''),
-        tipo: String(getValue('TIPO') || sheetName),
-        referencia: String(getValue('REFERENCIA') || ''),
-        tamanho: String(getValue('TAMANHO') || ''),
-        cor: String(getValue('COR') || ''),
-        quantidade: parseInt(getValue('QUANTIDADE') || 0, 10),
-        valor_unitario: parseFloat(getValue('VALOR_UNITARIO') || 0),
-        estoque_minimo: parseInt(getValue('ESTOQUE_MINIMO') || 0, 10),
-        data_criacao: String(getValue('DATA_CRIACAO') || ''),
-        ultima_movimentacao: String(getValue('ULTIMA_MOVIMENTACAO') || ''),
-        criado_por: String(getValue('CRIADO_POR') || '')
-      };
-    })
-    .filter((item) => item.id || item.referencia);
-}
-
-function findUnidadeRowById_(id) {
-  const ss = getUnidadesSpreadsheet_();
-  for (const sheetName of UNIDADES_SHEETS) {
-    const sheet = ensureUnidadesSheet_(sheetName);
-    const data = sheet.getDataRange().getValues();
-    if (data.length < 2) continue;
-
-    const headers = data[0];
-    const headerMap = getHeaderMap_(headers);
-    const idIndex = headerMap.ID;
-    if (idIndex === undefined) continue;
-
-    for (let i = 1; i < data.length; i++) {
-      const rowId = String(data[i][idIndex] || '').trim();
-      if (rowId === id) {
-        return { sheet, rowIndex: i + 1, headers, headerMap };
-      }
-    }
-  }
-
-  return null;
-}
-
-function getUnidades_Web() {
-  try {
-    Logger.log('[APP] 🧦 getUnidades_Web iniciado');
-
-    const unidades = UNIDADES_SHEETS
-      .flatMap((sheetName) => readUnidadesFromSheet_(sheetName))
-      .sort((a, b) => {
-        const tipoA = String(a.tipo || '').localeCompare(String(b.tipo || ''));
-        if (tipoA !== 0) return tipoA;
-        return String(a.referencia || '').localeCompare(String(b.referencia || ''));
-      });
-
-    Logger.log('[APP] ✅ Unidades encontradas: ' + unidades.length);
-    return unidades;
-    
-  } catch (error) {
-    Logger.log('[APP] ❌ Erro em getUnidades_Web: ' + error.message);
-    return [];
-  }
-}
-
-function addUnidade_Web(payload) {
-  try {
-    Logger.log('[APP] 🧦 addUnidade_Web iniciado');
-    
-    if (!payload.tipo || !payload.codigo) {
-      throw new Error('Tipo e código são obrigatórios');
-    }
-
-    const tipo = String(payload.tipo || '').toUpperCase().trim();
-    if (!UNIDADES_SHEETS.includes(tipo)) {
-      throw new Error('Tipo inválido. Use GOLA ou PUNHO');
-    }
-
-    const sheet = ensureUnidadesSheet_(tipo);
-    const headers = UNIDADES_HEADERS;
-    const headerMap = getHeaderMap_(headers);
-    
-    const novaUnidade = {
-      id: Utilities.getUuid(),
-      tipo,
-      nota_fiscal: String(payload.nota_fiscal || 'S/N').trim(),
-      codigo: String(payload.codigo || '').trim(),
-      referencia: payload.referencia || '',
-      tamanho: payload.tamanho || '',
-      cor: String(payload.cor || '').trim(),
-      quantidade: parseInt(payload.quantidade) || 0,
-      valor_unitario: parseFloat(payload.valor_unitario) || 0,
-      estoque_minimo: parseInt(payload.estoque_minimo) || 10,
-      data_criacao: new Date().toISOString(),
-      ultima_movimentacao: new Date().toISOString(),
-      criado_por: Session.getActiveUser().getEmail()
-    };
-
-    const row = new Array(headers.length).fill('');
-    row[headerMap.ID] = novaUnidade.id;
-    row[headerMap.TIPO] = novaUnidade.tipo;
-    row[headerMap.NOTA_FISCAL] = novaUnidade.nota_fiscal;
-    row[headerMap.CODIGO] = novaUnidade.codigo;
-    row[headerMap.REFERENCIA] = novaUnidade.referencia;
-    row[headerMap.TAMANHO] = novaUnidade.tamanho;
-    row[headerMap.COR] = novaUnidade.cor;
-    row[headerMap.QUANTIDADE] = novaUnidade.quantidade;
-    row[headerMap.VALOR_UNITARIO] = novaUnidade.valor_unitario;
-    row[headerMap.ESTOQUE_MINIMO] = novaUnidade.estoque_minimo;
-    row[headerMap.DATA_CRIACAO] = novaUnidade.data_criacao;
-    row[headerMap.ULTIMA_MOVIMENTACAO] = novaUnidade.ultima_movimentacao;
-    row[headerMap.CRIADO_POR] = novaUnidade.criado_por;
-
-    sheet.appendRow(row);
-    
-    Logger.log('[APP] ✅ Unidade adicionada: ' + novaUnidade.id);
-    return { status: 'SUCESSO', id: novaUnidade.id };
-    
-  } catch (error) {
-    Logger.log('[APP] ❌ Erro em addUnidade_Web: ' + error.message);
-    return { status: 'ERRO', message: error.message };
-  }
-}
-
-function movimentarUnidade_Web(payload) {
-  try {
-    Logger.log('[APP] 🧦 movimentarUnidade_Web iniciado');
-    
-    if (!payload.id || !payload.tipo || !payload.quantidade) {
-      throw new Error('ID, tipo e quantidade são obrigatórios');
-    }
-
-    const unidadeRow = findUnidadeRowById_(String(payload.id));
-    if (!unidadeRow) {
-      throw new Error('Unidade não encontrada');
-    }
-
-    const { sheet, rowIndex, headerMap } = unidadeRow;
-    const quantidadeAtual = parseInt(sheet.getRange(rowIndex, headerMap.QUANTIDADE + 1).getValue() || 0, 10);
-    const quantidade = parseInt(payload.quantidade);
-    const tipoMov = payload.tipo.toUpperCase(); // ENTRADA, SAIDA ou DELETE
-    
-    // Se for DELETE, remove a linha inteira
-    if (tipoMov === 'DELETE') {
-      sheet.deleteRow(rowIndex);
-      Logger.log('[APP] 🗑️ Unidade deletada: ' + payload.id + ' (linha ' + rowIndex + ')');
-      return { status: 'SUCESSO', message: 'Unidade excluída com sucesso' };
-    }
-    
-    let novaQuantidade = quantidadeAtual;
-    if (tipoMov === 'ENTRADA') {
-      novaQuantidade += quantidade;
-    } else if (tipoMov === 'SAIDA') {
-      novaQuantidade -= quantidade;
-      if (novaQuantidade < 0) {
-        throw new Error('Estoque insuficiente para esta saída');
-      }
-    } else {
-      throw new Error('Tipo de movimentação inválido. Use ENTRADA, SAIDA ou DELETE');
-    }
-
-    const ultimaMov = new Date().toISOString();
-    sheet.getRange(rowIndex, headerMap.QUANTIDADE + 1).setValue(novaQuantidade);
-    if (headerMap.ULTIMA_MOVIMENTACAO !== undefined) {
-      sheet.getRange(rowIndex, headerMap.ULTIMA_MOVIMENTACAO + 1).setValue(ultimaMov);
-    }
-    
-    Logger.log('[APP] ✅ Movimentação registrada para unidade: ' + payload.id);
-    return { status: 'SUCESSO', novaQuantidade };
-    
-  } catch (error) {
-    Logger.log('[APP] ❌ Erro em movimentarUnidade_Web: ' + error.message);
-    return { status: 'ERRO', message: error.message };
-  }
-}
-
-/* ============================================================
  *   🛒 PROCESSAMENTO DE DECISÕES DE COMPRAS
  * ============================================================ */
 
-function processarDecisaoCompras_Web(payload) {
+function processarDecisaoComprasV2_Web(payload) {
   const startTime = new Date().getTime();
   try {
     const { 
@@ -1582,6 +1561,8 @@ function processarDecisaoCompras_Web(payload) {
       compras_resposta: respostaCompras || observacoes || '',
       compras_responsavel: user,
       compras_data_decisao: new Date().toISOString(),
+      compras_status_case: 'resolvido',
+      compras_volta_estoque: voltarEstoque === false ? false : true,
       disponivel_com_ressalvas: false,
       motivo_ressalvas: ''
     };
@@ -1594,7 +1575,10 @@ function processarDecisaoCompras_Web(payload) {
       if (tipoDecisao === 'uso_com_ressalvas' || motivoRessalvas) {
         comprasData.disponivel_com_ressalvas = true;
         comprasData.motivo_ressalvas = motivoRessalvas || respostaCompras || 'Tecido reprovado pelo supervisor, mas aprovado para uso com ressalvas pelo setor de compras';
+        comprasData.compras_destino = 'estoque_com_ressalvas';
         Logger.log(`[COMPRAS] ⚠️ Marcado como DISPONÍVEL COM RESSALVAS`);
+      } else {
+        comprasData.compras_destino = 'estoque';
       }
       
       // Atualiza dados de compras ANTES de mover para estoque
@@ -1610,6 +1594,7 @@ function processarDecisaoCompras_Web(payload) {
       Logger.log(`[COMPRAS] ✅ Movido para estoque${comprasData.disponivel_com_ressalvas ? ' (COM RESSALVAS)' : ''}`);
     } else if (statusFinal.toUpperCase() === 'REPROVADO_COMPRAS') {
       // Se reprovado definitivamente, atualiza dados
+      comprasData.compras_destino = (tipoDecisao || '').toLowerCase() || 'devolucao';
       DatabaseService.rolls.update(idRolo, comprasData);
       WorkflowService.transition(idRolo, 'finalizado_reprovado', {
         usuario: user,
@@ -1646,6 +1631,102 @@ function processarDecisaoCompras_Web(payload) {
       status: 'ERRO',
       message: error.message
     };
+  }
+}
+
+function atualizarPendenciaCompras_Web(payload) {
+  try {
+    const idRolo = String(payload?.idRolo || '').trim();
+    const observacoes = String(payload?.observacoes || '').trim();
+    const tipoDecisao = String(payload?.tipoDecisao || 'em_negociacao').trim().toLowerCase();
+    const user = Session.getActiveUser().getEmail() || 'sistema';
+
+    if (!idRolo) throw new Error('idRolo é obrigatório');
+    if (!observacoes) throw new Error('Observação é obrigatória para pendência de compras');
+
+    const update = {
+      compras_status_case: 'em_negociacao',
+      compras_tipo_decisao: tipoDecisao,
+      compras_resposta: observacoes,
+      compras_responsavel: user,
+      compras_data_decisao: new Date().toISOString()
+    };
+
+    DatabaseService.rolls.update(idRolo, update);
+    return { status: 'SUCESSO', message: 'Pendência de compras atualizada', idRolo };
+  } catch (error) {
+    Logger.log('[COMPRAS] ❌ Erro em atualizarPendenciaCompras_Web: ' + error.message);
+    return { status: 'ERRO', message: error.message };
+  }
+}
+
+function parseHistoryField_(rawValue) {
+  if (Array.isArray(rawValue)) return rawValue;
+  if (!rawValue) return [];
+  if (typeof rawValue === 'string') {
+    try {
+      const parsed = JSON.parse(rawValue);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (e) {
+      return [];
+    }
+  }
+  return [];
+}
+
+function hasSupervisorReproval_(roll) {
+  const faseAtual = String(roll.fase_atual || roll.FASE_ATUAL || '').toLowerCase();
+  if (['enviado_compras', 'aprovado_compras', 'reprovado_compras', 'finalizado_reprovado'].includes(faseAtual)) {
+    return true;
+  }
+
+  const historico = parseHistoryField_(roll.historico_status || roll.HISTORICO_STATUS);
+  return historico.some((entry) => {
+    const fase = String(entry?.fase || '').toLowerCase();
+    const para = String(entry?.transicao?.para || '').toLowerCase();
+    return fase === 'reprovado_supervisor' || para === 'reprovado_supervisor';
+  });
+}
+
+function getComprasCases_Web() {
+  try {
+    const allRolls = DatabaseService.databaseQuery({
+      collection: 'INSPECOES',
+      orderBy: [{ field: 'DATA_ATUALIZACAO', direction: 'desc' }]
+    }) || [];
+
+    const filtered = allRolls.filter((roll) => hasSupervisorReproval_(roll));
+
+    const mapped = filtered.map((roll) => {
+      const relatorioFileId = String(
+        roll.relatorio_file_id || roll.RELATORIO_FILE_ID || ''
+      ).trim();
+
+      const fromRelatorio = relatorioFileId
+        ? ('https://drive.google.com/file/d/' + relatorioFileId + '/view')
+        : '';
+
+      const fromPdfReprovacao = String(
+        roll.pdf_reprovacao_url || roll.PDF_REPROVACAO_URL || ''
+      ).trim();
+
+      const fromLegacyUrl = String(
+        roll.pdf_url || roll.PDF_URL || roll.relatorio_url || roll.RELATORIO_URL || ''
+      ).trim();
+
+      const comprasPdfUrl = fromPdfReprovacao || fromRelatorio || fromLegacyUrl || '';
+      const comprasPdfStatus = comprasPdfUrl ? 'pronto' : 'pendente';
+
+      return Object.assign({}, roll, {
+        compras_pdf_url: comprasPdfUrl,
+        compras_pdf_status: comprasPdfStatus
+      });
+    });
+
+    return JSON.parse(JSON.stringify(mapped));
+  } catch (error) {
+    Logger.log('[COMPRAS] ❌ Erro em getComprasCases_Web: ' + error.message);
+    return [];
   }
 }
 

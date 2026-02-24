@@ -235,7 +235,7 @@ function sendComprasEmail(mainData, defects, docs) {
 
     try {
         const to = CONFIG.EMAIL.COMPRAS;
-        const id = mainData.id_do_rolo;
+        const id = mainData.id_do_rolo || mainData.ID_ROLO || mainData.roll_id || mainData.product_id || "N/A";
         if (!to) throw new Error("Email de Compras não configurado.");
 
         LogApp.log(`[${fn}] Enviando email para Compras: ${to} (rolo ${id}).`, LogApp.LEVELS.INFO);
@@ -247,8 +247,13 @@ function sendComprasEmail(mainData, defects, docs) {
                 relUrl = relatorioFile.getUrl();
             } catch (e) { LogApp.log(`[${fn}] Falha ao buscar PDF: ${e.message}`, LogApp.LEVELS.WARN); }
         }
+        if (!relUrl && docs?.pdfUrl) relUrl = String(docs.pdfUrl);
 
-        const linkAcompanhamento = `${CONFIG.URL.GARANTIA_APP}?page=compras&id=${encodeURIComponent(id)}`;
+                const garantiaBase =
+                    CONFIG?.URL?.GARANTIA_APP ||
+                    CONFIG?.URL?.SUPERVISOR_APP ||
+                    ScriptApp.getService().getUrl();
+                const linkAcompanhamento = `${garantiaBase}?page=compras&id=${encodeURIComponent(id)}`;
 
         let defeitosHtml = "<ul>";
         if (!defects?.length) defeitosHtml += "<li>Nenhum defeito de alto impacto registrado.</li>";
@@ -278,7 +283,9 @@ function sendComprasEmail(mainData, defects, docs) {
             qr: relUrl ? _qrCode(relUrl) : _qrCode(linkAcompanhamento)
         });
 
-        const attachments = relatorioFile ? [relatorioFile.getBlob()] : [];
+                const attachments = relatorioFile
+                    ? [relatorioFile.getBlob()]
+                    : (docs?.pdfBlob ? [docs.pdfBlob] : []);
 
         MailApp.sendEmail({
             to,

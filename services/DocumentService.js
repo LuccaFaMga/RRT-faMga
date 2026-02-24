@@ -112,7 +112,7 @@ function processRRTAsyncJob() {
       // ✅ FLUXO DE EMAIL: Passando BLOB e LINK de revisão (linkR)
       if (typeof sendRevisaoConcluidaEmail === "function") {
         sendRevisaoConcluidaEmail(
-          mainData,
+                    { ...mainData, defects },
           docs.pdfBlob, 
           links.linkR 
         );
@@ -121,18 +121,18 @@ function processRRTAsyncJob() {
       }
     }
 
-    if (reportType === "compras") {
-      // ✅ FLUXO DE EMAIL: Passando BLOB e LINK de acompanhamento (linkA)
-      if (typeof sendComprasEmail === "function") {
-        sendComprasEmail(
-          mainData,
-          docs.pdfBlob, 
-          links.linkA 
-        );
-      } else {
-        Logger.log("⚠️ sendComprasEmail não definida.");
-      }
-    }
+        if (reportType === "compras") {
+            // ✅ FLUXO DE EMAIL: Passa dados completos (mainData, defects, docs)
+            if (typeof sendComprasEmail === "function") {
+                sendComprasEmail(
+                    mainData,
+                    defects,
+                    docs
+                );
+            } else {
+                Logger.log("⚠️ sendComprasEmail não definida.");
+            }
+        }
 
     // ✅ STATUS FINAL — CORRIGIDO
     DatabaseService.rolls.updateStatus(
@@ -307,35 +307,64 @@ function generateReport(templateId, mainData, defects, photoIds, targetFolder, r
         applyTemplateReplacements(body, map);
         const fotosList = buildFotoList(defects, photoIds);
 
-        const marker = "{{INSERCAO_INICIO}}"; 
-        let found = body.findText(marker);
-        let insertionPos = found ? body.getChildIndex(found.getElement().getParent()) : body.getNumChildren();
-        if (found) found.getElement().asText().setText("");
+        const getInsertPosAndClear = (primaryMarker, fallbackMarkers) => {
+            const regexEscape = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+            let foundPrimary = body.findText(primaryMarker);
+            let pos = foundPrimary ? body.getChildIndex(foundPrimary.getElement().getParent()) : null;
+
+            if (pos === null && Array.isArray(fallbackMarkers)) {
+                for (let i = 0; i < fallbackMarkers.length; i++) {
+                    const fm = fallbackMarkers[i];
+                    const foundFallback = body.findText(fm);
+                    if (foundFallback) {
+                        pos = body.getChildIndex(foundFallback.getElement().getParent());
+                        break;
+                    }
+                }
+            }
+
+            const allMarkers = [primaryMarker].concat(fallbackMarkers || []);
+            allMarkers.forEach((m) => {
+                const rx = regexEscape(m);
+                body.replaceText(rx, "");
+            });
+
+            return pos === null ? body.getNumChildren() : pos;
+        };
+
+        const insertionPosCoordenadas = getInsertPosAndClear(
+            "{{INSERCAO_COORDENADAS}}",
+            ["{{INSERCAO_INICIO}}"]
+        );
+        const insertionPosProvas = getInsertPosAndClear(
+            "{{INSERCAO_PROVAS}}",
+            ["{{INSERCAO_INICIO}}"]
+        );
 
         if (reportType === 'compras') {
-            body.insertParagraph(insertionPos, "DETALHAMENTO E COORDENADAS DOS DEFEITOS").setHeading(DocumentApp.ParagraphHeading.HEADING3);
-            insertFormattedTable(body, insertionPos + 1, buildDefectDetailTableNative(defects));
+            body.insertParagraph(insertionPosCoordenadas, "DETALHAMENTO E COORDENADAS DOS DEFEITOS").setHeading(DocumentApp.ParagraphHeading.HEADING3);
+            insertFormattedTable(body, insertionPosCoordenadas + 1, buildDefectDetailTableNative(defects));
 
-            body.insertParagraph(insertionPos + 2, "DIAGRAMA DE LARGURA (Zonas A-E) - Áreas Afetadas").setHeading(DocumentApp.ParagraphHeading.HEADING3);
-            insertFormattedTable(body, insertionPos + 3, buildWidthMapTableNative(defects));
+            body.insertParagraph(insertionPosCoordenadas + 2, "DIAGRAMA DE LARGURA (Zonas A-E) - Áreas Afetadas").setHeading(DocumentApp.ParagraphHeading.HEADING3);
+            insertFormattedTable(body, insertionPosCoordenadas + 3, buildWidthMapTableNative(defects));
 
-            body.insertParagraph(insertionPos + 4, "MAPA VISUAL DO ROLO (Localização 2D dos Defeitos)").setHeading(DocumentApp.ParagraphHeading.HEADING3);
-            body.insertParagraph(insertionPos + 5, `O rolo é dividido em blocos de ${BLOCK_SIZE_2D} metros de comprimento (Eixo X) e 5 Zonas de Largura (Eixo Y). Células destacadas indicam a presença de defeitos.`).setItalic(true);
-            insertFormattedTable(body, insertionPos + 6, build2DRollMapGridNative(mainData, defects));
+            body.insertParagraph(insertionPosCoordenadas + 4, "MAPA VISUAL DO ROLO (Localização 2D dos Defeitos)").setHeading(DocumentApp.ParagraphHeading.HEADING3);
+            body.insertParagraph(insertionPosCoordenadas + 5, `O rolo é dividido em blocos de ${BLOCK_SIZE_2D} metros de comprimento (Eixo X) e 5 Zonas de Largura (Eixo Y). Células destacadas indicam a presença de defeitos.`).setItalic(true);
+            insertFormattedTable(body, insertionPosCoordenadas + 6, build2DRollMapGridNative(mainData, defects));
 
-            body.insertParagraph(insertionPos + 7, "GALERIA DE FOTOS DO ROLO").setHeading(DocumentApp.ParagraphHeading.HEADING3);
-            insertPhotosGridAt(body, insertionPos + 8, fotosList);
+            body.insertParagraph(insertionPosProvas, "GALERIA DE FOTOS DO ROLO").setHeading(DocumentApp.ParagraphHeading.HEADING3);
+            insertPhotosGridAt(body, insertionPosProvas + 1, fotosList);
 
         } else if (reportType === 'supervisor') {
-            body.insertParagraph(insertionPos, "MAPA VISUAL DO ROLO (Localização 2D dos Defeitos)").setHeading(DocumentApp.ParagraphHeading.HEADING3);
-            body.insertParagraph(insertionPos + 1, `O rolo é dividido em blocos de ${BLOCK_SIZE_2D} metros de comprimento (Eixo X) e 5 Zonas de Largura (Eixo Y). Células destacadas indicam a presença de defeitos.`).setItalic(true);
-            insertFormattedTable(body, insertionPos + 2, build2DRollMapGridNative(mainData, defects));
+            body.insertParagraph(insertionPosCoordenadas, "MAPA VISUAL DO ROLO (Localização 2D dos Defeitos)").setHeading(DocumentApp.ParagraphHeading.HEADING3);
+            body.insertParagraph(insertionPosCoordenadas + 1, `O rolo é dividido em blocos de ${BLOCK_SIZE_2D} metros de comprimento (Eixo X) e 5 Zonas de Largura (Eixo Y). Células destacadas indicam a presença de defeitos.`).setItalic(true);
+            insertFormattedTable(body, insertionPosCoordenadas + 2, build2DRollMapGridNative(mainData, defects));
 
-            body.insertParagraph(insertionPos + 3, "DIAGRAMA DE LARGURA (Zonas A-E) - Áreas Afetadas").setHeading(DocumentApp.ParagraphHeading.HEADING3);
-            insertFormattedTable(body, insertionPos + 4, buildWidthMapTableNative(defects));
+            body.insertParagraph(insertionPosCoordenadas + 3, "DIAGRAMA DE LARGURA (Zonas A-E) - Áreas Afetadas").setHeading(DocumentApp.ParagraphHeading.HEADING3);
+            insertFormattedTable(body, insertionPosCoordenadas + 4, buildWidthMapTableNative(defects));
 
-            body.insertParagraph(insertionPos + 5, "GALERIA DE FOTOS DO ROLO").setHeading(DocumentApp.ParagraphHeading.HEADING3);
-            insertPhotosGridAt(body, insertionPos + 6, fotosList);
+            body.insertParagraph(insertionPosProvas, "GALERIA DE FOTOS DO ROLO").setHeading(DocumentApp.ParagraphHeading.HEADING3);
+            insertPhotosGridAt(body, insertionPosProvas + 1, fotosList);
         }
 
         // -------------------------------
@@ -380,16 +409,37 @@ function buildReplaceMapUnified(d, defects) {
         return isNaN(num) ? "" : num.toFixed(dp);
     };
 
-    // --- LÓGICA DE STATUS DO REVISOR ---
-    // Apenas APROVADO ou EM ANÁLISE
-    let finalStatus = "";
-    if (d.status_rolo === 'APROVADO') {
-        finalStatus = '✅ APROVADO PELO REVISOR';
-    } else if (d.status_rolo === 'EM ANÁLISE') {
-        finalStatus = '🔍 EM ANÁLISE PELO SUPERVISOR';
-    } else {
-        finalStatus = '⚠️ STATUS INVÁLIDO';
-    }
+    const pick = (...values) => values.find(v => v !== undefined && v !== null && String(v) !== "");
+
+        // --- LÓGICA DE STATUS DO REVISOR ---
+        const normalizedStatus = String(
+            d.status_rolo || d.status || d.status_final || d.fase_atual || ""
+        ).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
+        let finalStatus = "";
+        if (
+            normalizedStatus === 'aprovado' ||
+            normalizedStatus === 'aprovado_revisor' ||
+            normalizedStatus === 'aprovado_supervisor' ||
+            normalizedStatus === 'em_estoque'
+        ) {
+                finalStatus = '✅ APROVADO';
+        } else if (
+            normalizedStatus === 'em analise' ||
+            normalizedStatus === 'em_analise' ||
+            normalizedStatus === 'aguardando_supervisor'
+        ) {
+                finalStatus = '🔍 EM ANÁLISE PELO SUPERVISOR';
+        } else if (
+            normalizedStatus === 'reprovado_supervisor' ||
+            normalizedStatus === 'enviado_compras' ||
+            normalizedStatus === 'reprovado_compras' ||
+            normalizedStatus === 'finalizado_reprovado'
+        ) {
+                finalStatus = '❌ REPROVADO';
+        } else {
+                finalStatus = 'ℹ️ STATUS EM PROCESSAMENTO';
+        }
 
     // --- CONTAGEM DE DEFESOS POR GRAVIDADE ---
     let criticosCount = 0;
@@ -417,22 +467,35 @@ function buildReplaceMapUnified(d, defects) {
     const isReprovadoPorGravidade = criticosCount > 0;
     const isReprovadoPorGravidadeText = isReprovadoPorGravidade ? 'SIM (Descarte Imediato)' : 'NÃO';
 
+    const rollId = pick(d.id_do_rolo, d.ID_ROLO, d.roll_id, d.product_id);
+    const fornecedor = pick(d.fornecedor, d.FORNECEDOR, d.supplier_nm, d.supplier_name);
+    const numeroPeca = pick(d.numero_peca, d.NF, d.nf, d.lot, d.LOTE);
+    const referencia = pick(d.referencia, d.produto_id, d.PRODUTO_ID, d.product_id, d.PRODUCT_ID);
+    const cor = pick(d.cor, d.COR, d.color_id, d.COLOR_ID);
+    const metrosMaquina = pick(d.metros_maquina, d.METROS_MAQUINA, d.metros_revisado, d.METROS_REVISADO);
+    const metrosFornecedor = pick(d.metros_fornecedor, d.METROS_FORNECEDOR, d.wid, d.WID);
+    const larguraCm = pick(d.largura_cm, d.LARGURA_CM, d.len, d.LEN);
+    const observacoes = pick(d.observacoes, d.OBSERVACOES, d.parecer_final, d.PARECER_FINAL, d.compras_resposta);
+    const pontosTotais = pick(d.pontos_totais, d.PONTOS_TOTAIS, d.total_pontos, d.TOTAL_PONTOS, d.pontos, d.PONTOS);
+    const pontosPor100m2 = pick(d.pontos_por_100m2, d.PONTOS_POR_100M2);
+    const statusPontuacao = pick(d.status_pontuacao, d.STATUS_PONTUACAO, d.status_qualidade_pontos, d.STATUS_QUALIDADE_PONTOS);
+
     return {
         // Dados do Rolo
-        "{{id_do_rolo}}": safe(d.id_do_rolo),
-        "{{fornecedor}}": safe(d.fornecedor),
-        "{{numero_peca}}": safe(d.numero_peca),
-        "{{referencia}}": safe(d.referencia),
-        "{{cor}}": safe(d.cor),
-        "{{metros_maquina}}": safe(d.metros_maquina),
-        "{{metros_fornecedor}}": safe(d.metros_fornecedor),
-        "{{largura_cm}}": safe(d.largura_cm),
-        "{{observacoes}}": safe(d.observacoes),
+        "{{id_do_rolo}}": safe(rollId),
+        "{{fornecedor}}": safe(fornecedor),
+        "{{numero_peca}}": safe(numeroPeca),
+        "{{referencia}}": safe(referencia),
+        "{{cor}}": safe(cor),
+        "{{metros_maquina}}": safe(metrosMaquina),
+        "{{metros_fornecedor}}": safe(metrosFornecedor),
+        "{{largura_cm}}": safe(larguraCm),
+        "{{observacoes}}": safe(observacoes),
 
         // Métricas de Qualidade
-        "{{pontos_totais}}": safeNum(d.pontos_totais, 0),
-        "{{pontos_por_100m2}}": safeNum(d.pontos_por_100m2),
-        "{{status_pontuacao}}": safe(d.status_pontuacao),
+        "{{pontos_totais}}": safeNum(pontosTotais, 0),
+        "{{pontos_por_100m2}}": safeNum(pontosPor100m2),
+        "{{status_pontuacao}}": safe(statusPontuacao),
 
         // Campos de Status/Gravidade
         "{{status_final_consolidado}}": finalStatus,
