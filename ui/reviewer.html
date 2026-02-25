@@ -4535,21 +4535,22 @@ async function scanQrFromCamera() {
     modal.style.cssText = `
       position: fixed;
       inset: 0;
-      background: rgba(0,0,0,0.92);
+      background: #000;
       z-index: 10001;
       display: flex;
       flex-direction: column;
       align-items: center;
-      justify-content: center;
+      justify-content: flex-start;
+      padding-top: 18px;
     `;
 
     const title = document.createElement('h3');
-    title.textContent = '📷 Leitura de QR Code';
-    title.style.cssText = 'color:#fff;margin-bottom:6px';
+    title.textContent = 'Escanear Código';
+    title.style.cssText = 'color:#fff;margin-bottom:6px;font-size:20px;font-weight:600;letter-spacing:0.2px';
 
     const instructions = document.createElement('p');
-    instructions.textContent = 'Centralize o QR Code no quadro';
-    instructions.style.cssText = 'color:#bbb;margin-bottom:12px';
+    instructions.textContent = 'Centralize o QR na área destacada';
+    instructions.style.cssText = 'color:rgba(255,255,255,0.82);margin-bottom:10px;font-size:14px';
 
     // =========================
     // CÂMERA GRANDE
@@ -4557,12 +4558,10 @@ async function scanQrFromCamera() {
     const videoContainer = document.createElement('div');
     videoContainer.style.cssText = `
       position: relative;
-      width: 95%;
-      max-width: 760px;
-      height: 70vh;
-      max-height: 620px;
+      width: 100vw;
+      height: 100vh;
       background: #000;
-      border-radius: 16px;
+      border-radius: 0;
       overflow: hidden;
     `;
 
@@ -4588,19 +4587,55 @@ async function scanQrFromCamera() {
     `;
 
     const frameSize = 260;
+    const frameShowSize = 340;
 
     const frame = document.createElement('div');
     frame.style.cssText = `
-      width:${frameSize}px;
-      height:${frameSize}px;
-      border:4px solid #ef4444;
-      border-radius:16px;
+      width:${frameShowSize}px;
+      height:${frameShowSize}px;
+      border:1px solid rgba(255,255,255,0.28);
+      border-radius:24px;
       box-shadow:0 0 0 9999px rgba(0,0,0,0.45);
-      transition: border-color .2s, box-shadow .2s;
+      transition: box-shadow .2s, transform .2s;
+      position:relative;
     `;
+
+    const cornerGuide = document.createElement('div');
+    cornerGuide.style.cssText = `
+      position:absolute;
+      inset:0;
+      pointer-events:none;
+    `;
+
+    const createCorner = (top, left, right, bottom) => {
+      const c = document.createElement('div');
+      c.style.cssText = `
+        position:absolute;
+        width:34px;
+        height:34px;
+        border-color:#ffd60a;
+        border-style:solid;
+        border-width:${top ? '5px' : '0'} ${right ? '5px' : '0'} ${bottom ? '5px' : '0'} ${left ? '5px' : '0'};
+        border-radius:10px;
+        opacity:0.95;
+        transition:border-color .2s ease;
+      `;
+      if (top) c.style.top = '8px';
+      if (left) c.style.left = '8px';
+      if (right) c.style.right = '8px';
+      if (bottom) c.style.bottom = '8px';
+      return c;
+    };
+
+    cornerGuide.appendChild(createCorner(true, true, false, false));
+    cornerGuide.appendChild(createCorner(true, false, true, false));
+    cornerGuide.appendChild(createCorner(false, true, false, true));
+    cornerGuide.appendChild(createCorner(false, false, true, true));
+    frame.appendChild(cornerGuide);
 
     const scanLine = document.createElement('div');
     scanLine.style.cssText = `
+      display:none;
       position:absolute;
       width:${frameSize}px;
       height:3px;
@@ -4626,12 +4661,19 @@ async function scanQrFromCamera() {
     // STATUS
     // =========================
     const statusText = document.createElement('p');
-    statusText.textContent = '🔴 Centralize o QR Code';
+    statusText.textContent = 'Alinhe o QR dentro da moldura';
     statusText.style.cssText = `
-      margin-top:12px;
-      color:#fff;
-      font-size:16px;
-      font-weight:600;
+      margin-top:-108px;
+      color:rgba(255,255,255,0.95);
+      font-size:15px;
+      font-weight:500;
+      text-align:center;
+      z-index:2;
+      background:rgba(0,0,0,0.42);
+      border:1px solid rgba(255,255,255,0.16);
+      border-radius:9999px;
+      padding:8px 14px;
+      backdrop-filter:blur(6px);
     `;
 
     const scannerStateBadge = document.createElement('div');
@@ -4648,6 +4690,7 @@ async function scanQrFromCamera() {
       font-size: 12px;
       font-weight: 700;
       letter-spacing: 0.2px;
+      display:none;
     `;
     const scannerStateDot = document.createElement('span');
     scannerStateDot.style.cssText = `
@@ -4668,27 +4711,32 @@ async function scanQrFromCamera() {
     // =========================
     const feedbackBox = document.createElement('div');
     feedbackBox.style.cssText = `
-      margin-top:16px;
-      padding:16px 24px;
-      background:rgba(0,0,0,0.75);
-      border-radius:12px;
-      border:2px solid #ef4444;
-      min-width:320px;
+      position:fixed;
+      left:50%;
+      bottom:88px;
+      transform:translateX(-50%);
+      padding:10px 14px;
+      background:rgba(17,24,39,0.62);
+      border-radius:9999px;
+      border:1px solid rgba(255,255,255,0.18);
+      min-width:260px;
       text-align:center;
       transition:all 0.3s ease;
+      backdrop-filter:blur(4px);
+      z-index:3;
     `;
 
     const feedbackIcon = document.createElement('div');
-    feedbackIcon.style.cssText = 'font-size:48px;margin-bottom:8px;';
-    feedbackIcon.textContent = '🔴';
+    feedbackIcon.style.cssText = 'display:none;';
+    feedbackIcon.textContent = '🎯';
 
     const feedbackMessage = document.createElement('div');
-    feedbackMessage.style.cssText = 'font-size:18px;font-weight:700;color:#fff;margin-bottom:4px;';
-    feedbackMessage.textContent = 'Procurando QR Code...';
+    feedbackMessage.style.cssText = 'font-size:14px;font-weight:600;color:#f8fafc;margin-bottom:0;';
+    feedbackMessage.textContent = 'Procurando QR...';
 
     const feedbackHint = document.createElement('div');
-    feedbackHint.style.cssText = 'font-size:14px;color:#bbb;margin-top:8px;';
-    feedbackHint.textContent = 'Posicione a câmera sobre o código';
+    feedbackHint.style.cssText = 'font-size:12px;color:#d1d5db;margin-top:2px;';
+    feedbackHint.textContent = 'Mantenha a câmera parada';
 
     feedbackBox.appendChild(feedbackIcon);
     feedbackBox.appendChild(feedbackMessage);
@@ -4708,6 +4756,7 @@ async function scanQrFromCamera() {
       max-width: 320px;
       margin-left: auto;
       margin-right: auto;
+      display:none;
     `;
     
     const progressFill = document.createElement('div');
@@ -4719,6 +4768,95 @@ async function scanQrFromCamera() {
     `;
     progressBar.appendChild(progressFill);
 
+    // =========================
+    // BOX DE PRÉVIA DO QR
+    // =========================
+    const previewBox = document.createElement('div');
+    previewBox.style.cssText = `
+      position: fixed;
+      bottom: 160px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(17,24,39,0.88);
+      border: 1px solid rgba(34,197,89,0.6);
+      border-radius: 12px;
+      padding: 12px 16px;
+      max-width: 300px;
+      z-index: 4;
+      display: none;
+      backdrop-filter: blur(8px);
+      box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+    `;
+
+    const previewThumb = document.createElement('img');
+    previewThumb.style.cssText = `
+      width: 100%;
+      height: 120px;
+      object-fit: cover;
+      border-radius: 8px;
+      margin-bottom: 8px;
+      border: 1px solid rgba(255,255,255,0.2);
+    `;
+
+    const previewData = document.createElement('div');
+    previewData.style.cssText = `
+      font-size: 12px;
+      color: #e2e8f0;
+      line-height: 1.5;
+      font-family: monospace;
+      word-break: break-all;
+      max-height: 100px;
+      overflow-y: auto;
+      margin-bottom: 10px;
+    `;
+
+    const previewActions = document.createElement('div');
+    previewActions.style.cssText = `
+      display: flex;
+      gap: 8px;
+      justify-content: center;
+    `;
+
+    const previewConfirmBtn = document.createElement('button');
+    previewConfirmBtn.textContent = '✅ Confirmar';
+    previewConfirmBtn.style.cssText = `
+      padding: 6px 12px;
+      background: #10b981;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    `;
+    previewConfirmBtn.onmouseover = () => previewConfirmBtn.style.background = '#059669';
+    previewConfirmBtn.onmouseout = () => previewConfirmBtn.style.background = '#10b981';
+
+    const previewRejectBtn = document.createElement('button');
+    previewRejectBtn.textContent = '❌ Tentar Novamente';
+    previewRejectBtn.style.cssText = `
+      padding: 6px 12px;
+      background: #64748b;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    `;
+    previewRejectBtn.onmouseover = () => previewRejectBtn.style.background = '#475569';
+    previewRejectBtn.onmouseout = () => previewRejectBtn.style.background = '#64748b';
+
+    previewActions.appendChild(previewConfirmBtn);
+    previewActions.appendChild(previewRejectBtn);
+
+    previewBox.appendChild(previewThumb);
+    previewBox.appendChild(previewData);
+    previewBox.appendChild(previewActions);
+    document.body.appendChild(previewBox);
+
     const updateFeedback = (stats) => {
       // Atualizar barra de progresso
       const searchTimeSeconds = Math.min((frameTick * 0.1), 10); // Max 10 segundos
@@ -4726,41 +4864,41 @@ async function scanQrFromCamera() {
       progressFill.style.width = (stats.detected && stats.wellPositioned ? 100 : progressPercent) + '%';
 
       if (!stats.detected) {
-        // Não detectado - vermelho
-        feedbackIcon.textContent = '🔍';
-        feedbackMessage.textContent = 'Procurando QR Code...';
-        feedbackMessage.style.color = '#fff';
-        feedbackHint.textContent = 'Aponte a câmera diretamente para o código';
-        feedbackBox.style.borderColor = '#ef4444';
-        feedbackBox.style.background = 'rgba(239,68,68,0.15)';
+        // Não detectado - neutro
+        feedbackIcon.textContent = '🎯';
+        feedbackMessage.textContent = 'Procurando QR...';
+        feedbackMessage.style.color = '#f8fafc';
+        feedbackHint.textContent = 'Alinhe dentro da moldura e evite tremer';
+        feedbackBox.style.borderColor = 'rgba(148,163,184,0.45)';
+        feedbackBox.style.background = 'rgba(2,6,23,0.55)';
       } else if (stats.wellPositioned) {
         // Perfeito - verde
         feedbackIcon.textContent = '✅';
-        feedbackMessage.textContent = 'QR Code Detectado!';
+        feedbackMessage.textContent = 'QR detectado com sucesso';
         feedbackMessage.style.color = '#10b981';
-        feedbackHint.textContent = '✅ Lido com sucesso - processando...';
+        feedbackHint.textContent = 'Processando leitura...';
         feedbackBox.style.borderColor = '#10b981';
-        feedbackBox.style.background = 'rgba(16,185,129,0.15)';
+        feedbackBox.style.background = 'rgba(16,185,129,0.12)';
         progressFill.style.width = '100%';
       } else {
         // Detectado mas precisa ajustar - amarelo
         feedbackIcon.textContent = '⚠️';
-        feedbackMessage.textContent = 'QR Detectado!';
+        feedbackMessage.textContent = 'QR detectado';
         feedbackMessage.style.color = '#f59e0b';
         
         // Mensagem específica baseada no problema
         if (stats.tooFar) {
-          feedbackHint.textContent = '📍 Aproxime mais a câmera';
+          feedbackHint.textContent = 'Aproxime um pouco a câmera';
         } else if (stats.tooClose) {
-          feedbackHint.textContent = '📍 Afaste um pouco a câmera';
+          feedbackHint.textContent = 'Afaste um pouco a câmera';
         } else if (!stats.isStable) {
-          feedbackHint.textContent = '✋ Mantenha parada por 1 segundo';
+          feedbackHint.textContent = 'Mantenha estável por 1 segundo';
         } else {
-          feedbackHint.textContent = `⌛ Aguarde ${stats.timeRemaining}s...`;
+          feedbackHint.textContent = `Ajustando leitura... ${stats.timeRemaining}s`;
         }
         
         feedbackBox.style.borderColor = '#f59e0b';
-        feedbackBox.style.background = 'rgba(245,158,11,0.15)';
+        feedbackBox.style.background = 'rgba(245,158,11,0.12)';
       }
     };
 
@@ -4768,37 +4906,39 @@ async function scanQrFromCamera() {
     // BOTÕES
     // =========================
     const buttons = document.createElement('div');
-    buttons.style.cssText = 'margin-top:16px;display:flex;gap:12px;justify-content:center;flex-wrap:wrap';
+    buttons.style.cssText = 'position:fixed;left:0;right:0;bottom:26px;display:flex;gap:12px;justify-content:center;flex-wrap:wrap;z-index:3';
 
     const captureBtn = document.createElement('button');
-    captureBtn.textContent = '📸 Capturar Foto Estática';
+    captureBtn.textContent = 'Capturar';
     captureBtn.style.cssText = `
-      padding: 10px 16px;
-      border-radius: 8px;
-      border: none;
-      background: #3b82f6;
+      padding: 10px 18px;
+      border-radius: 9999px;
+      border: 1px solid rgba(255,255,255,0.28);
+      background: rgba(59,130,246,0.55);
       color: #fff;
-      font-weight: 600;
+      font-weight: 500;
       font-size: 14px;
       cursor: pointer;
       transition: all 0.2s;
+      backdrop-filter:blur(8px);
     `;
     captureBtn.style.touchAction = 'manipulation';
     captureBtn.onmouseover = () => captureBtn.style.background = '#2563eb';
     captureBtn.onmouseout = () => captureBtn.style.background = '#3b82f6';
 
     const cancelBtn = document.createElement('button');
-    cancelBtn.textContent = '❌ Cancelar';
+    cancelBtn.textContent = 'Cancelar';
     cancelBtn.style.cssText = `
-      padding: 10px 16px;
-      border-radius: 8px;
-      border: none;
-      background: #ef4444;
+      padding: 10px 18px;
+      border-radius: 9999px;
+      border: 1px solid rgba(255,255,255,0.28);
+      background: rgba(15,23,42,0.72);
       color: #fff;
-      font-weight: 600;
+      font-weight: 500;
       font-size: 14px;
       cursor: pointer;
       transition: all 0.2s;
+      backdrop-filter:blur(8px);
     `;
     cancelBtn.style.touchAction = 'manipulation';
     cancelBtn.onmouseover = () => cancelBtn.style.background = '#dc2626';
@@ -4830,7 +4970,22 @@ async function scanQrFromCamera() {
     let activeTrack = null;
     let torchSupported = false;
     let torchOn = false;
+    let minZoomLevel = 1;
+    let maxZoomLevel = 1;
+    let maxOperationalZoom = 1;
+    let currentZoomLevel = null;
+    let lastZoomAdjustTick = 0;
     let scannerUiState = '';
+    let autoStaticTriggered = false;
+    let upscaleScratchSrcCanvas = null;
+    let upscaleScratchDstCanvas = null;
+    const MAX_UPSCALE_PIXELS = lowEndByMemory ? 1500000 : 2600000;
+
+    function setGuideColor(color) {
+      cornerGuide.querySelectorAll('div').forEach(el => {
+        el.style.borderColor = color;
+      });
+    }
 
     function setScannerUiState(state, label) {
       const nextState = `${state}:${label || ''}`;
@@ -4899,6 +5054,17 @@ async function scanQrFromCamera() {
     const cleanup = () => {
       if (interval) clearInterval(interval);
       if (stream) stream.getTracks().forEach(t => t.stop());
+      if (upscaleScratchSrcCanvas) {
+        upscaleScratchSrcCanvas.width = 0;
+        upscaleScratchSrcCanvas.height = 0;
+      }
+      if (upscaleScratchDstCanvas) {
+        upscaleScratchDstCanvas.width = 0;
+        upscaleScratchDstCanvas.height = 0;
+      }
+      if (previewBox && previewBox.parentNode) {
+        previewBox.parentNode.removeChild(previewBox);
+      }
       modal.remove();
       style.remove();
       if (ScanTelemetry.nativeDetections > 0 || Object.keys(ScanTelemetry.jsqrAttempts).length > 0 || Object.keys(ScanTelemetry.zxingAttempts).length > 0) {
@@ -4919,12 +5085,44 @@ async function scanQrFromCamera() {
       const summary = ScanTelemetry.toSummary();
       QrTelemetrySession.recordScan(summary);
       const miniRanking = QrTelemetrySession.getMiniRankingText(3);
-      if (typeof UI !== 'undefined' && UI.showToast) {
-        UI.showToast(`✅ QR lido • Top estratégias: ${miniRanking}`, '#2563eb');
-      }
+      
+      // Mostrar prévia antes de confirmar
+      if (previewBox) {
+        previewBox.style.display = 'block';
+        
+        // Extrair primeiro e último parte do código para prévia
+        const displayText = normalized.length > 100 
+          ? normalized.substring(0, 100) + '...' 
+          : normalized;
+        previewData.textContent = displayText;
 
-      cleanup();
-      resolve(normalized);
+        // Confirmar: finalizar com o código lido
+        previewConfirmBtn.onclick = () => {
+          previewBox.style.display = 'none';
+          if (typeof UI !== 'undefined' && UI.showToast) {
+            UI.showToast(`✅ QR confirmado • Top: ${miniRanking}`, '#2563eb');
+          }
+          cleanup();
+          resolve(normalized);
+        };
+
+        // Rejeitar: permitir nova leitura
+        previewRejectBtn.onclick = () => {
+          previewBox.style.display = 'none';
+          settled = false;
+          stableCount = 0;
+          lastCodeData = '';
+          setScannerUiState('active', 'Procurando novo QR...');
+          console.log('[DEBUG_QR] ⚠️ Usuário rejeitou o QR, retentando...');
+        };
+      } else {
+        // Fallback se previewBox não existir
+        if (typeof UI !== 'undefined' && UI.showToast) {
+          UI.showToast(`✅ QR lido • Top: ${miniRanking}`, '#2563eb');
+        }
+        cleanup();
+        resolve(normalized);
+      }
     };
 
     async function handleStaticCapture() {
@@ -4968,12 +5166,28 @@ async function scanQrFromCamera() {
             const imageData = ctx.getImageData(0, 0, hires.width, hires.height);
             const width = hires.width;
             const height = hires.height;
+            const adaptiveCtx = buildAdaptiveContext(imageData, true);
 
             // Aplicar equalizações agressivas para foto estática
+            const contrast = toGrayscaleHighContrast(imageData);
             const equalized = equalizeHistogram(imageData);
             const aggressive = toAggressiveBinary(imageData);
+            const maskedBottom = maskBottomEdge(
+              imageData.data,
+              width,
+              height,
+              adaptiveCtx && Number.isFinite(adaptiveCtx.maskBottomRatio) ? adaptiveCtx.maskBottomRatio : 0.32,
+              adaptiveCtx
+            );
+            const roi = extractCenteredRoi(imageData, 0.72);
+            const roiUpscaled15 = roi ? upscaleImageDataCanvas(roi.data, roi.width, roi.height, 1.5) : null;
+            const roiUpscaled2 = roi ? upscaleImageDataCanvas(roi.data, roi.width, roi.height, 2.0) : null;
 
             const variants = [
+              ...(roiUpscaled2 ? [{ data: roiUpscaled2.data, width: roiUpscaled2.width, height: roiUpscaled2.height, name: 'roi-upscale2-hires' }] : []),
+              ...(roiUpscaled15 ? [{ data: roiUpscaled15.data, width: roiUpscaled15.width, height: roiUpscaled15.height, name: 'roi-upscale15-hires' }] : []),
+              { data: maskedBottom, name: 'masked-bottom-hires' },
+              { data: contrast, name: 'contrast-hires' },
               { data: equalized, name: 'equalized-hires' },
               { data: aggressive, name: 'aggressive-hires' },
               { data: imageData.data, name: 'original-hires' }
@@ -4982,7 +5196,9 @@ async function scanQrFromCamera() {
             for (const variant of variants) {
               try {
                 ScanTelemetry.addAttempt('zxing', `static-${variant.name}`);
-                const luminances = new Uint8ClampedArray(width * height);
+                const variantWidth = variant.width || width;
+                const variantHeight = variant.height || height;
+                const luminances = new Uint8ClampedArray(variantWidth * variantHeight);
                 for (let i = 0, j = 0; i < variant.data.length; i += 4, j++) {
                   const r = variant.data[i];
                   const g = variant.data[i + 1];
@@ -4990,7 +5206,7 @@ async function scanQrFromCamera() {
                   luminances[j] = Math.floor(0.299 * r + 0.587 * g + 0.114 * b);
                 }
 
-                const luminanceSource = new ZXing.RGBLuminanceSource(luminances, width, height);
+                const luminanceSource = new ZXing.RGBLuminanceSource(luminances, variantWidth, variantHeight);
                 const binaryBitmap = new ZXing.BinaryBitmap(new ZXing.HybridBinarizer(luminanceSource));
                 const reader = new ZXing.QRCodeReader();
                 const result = reader.decode(binaryBitmap);
@@ -5026,8 +5242,8 @@ async function scanQrFromCamera() {
         if (code) {
           console.log('[DEBUG_QR] ✅ Captura estática bem-sucedida!');
           statusText.textContent = '✅ QR lido da foto estática!';
-          frame.style.borderColor = '#22c55e';
-          frame.style.boxShadow = '0 0 25px rgba(34,197,94,.7)';
+          setGuideColor('#34c759');
+          frame.style.boxShadow = '0 0 22px rgba(52,199,89,.55)';
           progressFill.style.width = '100%';
           
           setTimeout(() => {
@@ -5149,10 +5365,10 @@ async function scanQrFromCamera() {
       stableCount = sameCode ? stableCount + 1 : 1;
       lastCodeData = codeData;
 
-      frame.style.borderColor = '#22c55e';
-      frame.style.boxShadow = '0 0 25px rgba(34,197,94,.7)';
+      setGuideColor('#34c759');
+      frame.style.boxShadow = '0 0 22px rgba(52,199,89,.55)';
       scanLine.style.animationPlayState = 'paused';
-      statusText.textContent = message || '✅ QR detectado — aguarde...';
+      statusText.textContent = message || 'QR detectado, confirmando leitura...';
       
       console.log('[DEBUG_QR] 🎯 markDetected chamado | stableCount:', stableCount, '| sameCode:', sameCode, '| código:', codeData.substring(0, 30) + '...');
 
@@ -5175,6 +5391,8 @@ async function scanQrFromCamera() {
 
     function buildAdaptiveContext(imageData, isDirtyMode) {
       const data = imageData.data;
+      const width = imageData.width || 0;
+      const height = imageData.height || 0;
       const pixelCount = Math.max(1, (data.length / 4) | 0);
       const step = Math.max(1, Math.floor(pixelCount / 1024));
 
@@ -5204,6 +5422,46 @@ async function scanQrFromCamera() {
       const lowContrast = contrast < 55;
       const noisyFrame = stdDev > 52;
 
+      let bottomDarkPixels = 0;
+      let bottomPixels = 0;
+      let noisyBottomColumns = 0;
+      let inspectedBottomColumns = 0;
+
+      if (width > 0 && height > 0) {
+        const bottomBandHeight = Math.max(4, Math.floor(height * 0.20));
+        const yStart = Math.max(0, height - bottomBandHeight);
+        const darkThreshold = clamp(Math.round(avg - 15), 70, 145);
+
+        for (let x = 0; x < width; x++) {
+          let darkInColumn = 0;
+          let transitions = 0;
+          let prevDark = null;
+
+          for (let y = yStart; y < height; y++) {
+            const idx = (y * width + x) * 4;
+            const lum = (0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2]);
+            const isDark = lum <= darkThreshold;
+
+            if (isDark) darkInColumn++;
+            if (prevDark !== null && prevDark !== isDark) transitions++;
+            prevDark = isDark;
+          }
+
+          const colRatio = bottomBandHeight > 0 ? (darkInColumn / bottomBandHeight) : 0;
+          if (colRatio >= 0.28 && colRatio <= 0.92 && transitions >= 2) {
+            noisyBottomColumns++;
+          }
+
+          inspectedBottomColumns++;
+          bottomDarkPixels += darkInColumn;
+          bottomPixels += bottomBandHeight;
+        }
+      }
+
+      const bottomBlackRatio = bottomPixels > 0 ? (bottomDarkPixels / bottomPixels) : 0;
+      const bottomNoiseColumnsRatio = inspectedBottomColumns > 0 ? (noisyBottomColumns / inspectedBottomColumns) : 0;
+      const bottomNoiseDetected = bottomBlackRatio > 0.16 && bottomNoiseColumnsRatio > 0.12;
+
       const binaryThreshold = clamp(
         avg + (darkScene ? -8 : 0) + (brightScene ? 6 : 0) + (lowContrast ? -6 : 0),
         70,
@@ -5223,9 +5481,14 @@ async function scanQrFromCamera() {
       );
 
       const maskBottomRatio = clamp(
-        0.24 + (isDirtyMode ? 0.08 : 0) + (lowContrast ? 0.04 : 0),
+        0.24
+          + (isDirtyMode ? 0.08 : 0)
+          + (lowContrast ? 0.04 : 0)
+          + (bottomNoiseDetected ? 0.08 : 0)
+          + (bottomBlackRatio > 0.26 ? 0.04 : 0)
+          + (bottomNoiseColumnsRatio > 0.28 ? 0.04 : 0),
         0.2,
-        0.42
+        0.5
       );
 
       return {
@@ -5236,7 +5499,10 @@ async function scanQrFromCamera() {
         binaryThreshold,
         aggressiveFactor,
         aggressiveRadius,
-        maskBottomRatio
+        maskBottomRatio,
+        bottomBlackRatio,
+        bottomNoiseColumnsRatio,
+        bottomNoiseDetected
       };
     }
 
@@ -5391,9 +5657,73 @@ async function scanQrFromCamera() {
     }
     
     // Nova função: Mascarar todo o perímetro inferior (bottom edge completo)
-    function maskBottomEdge(data, width, height, coverYRatio = 0.30) {
+    function maskBottomEdge(data, width, height, coverYRatio = 0.30, adaptiveCtx = null) {
       const out = new Uint8ClampedArray(data);
+      if (!width || !height) return out;
+
       const yStart = Math.max(0, Math.floor(height * (1 - coverYRatio)));
+
+      const analyzeBandHeight = Math.max(4, Math.floor(height * 0.20));
+      const analyzeStart = Math.max(0, height - analyzeBandHeight);
+      const thresholdBase = adaptiveCtx && Number.isFinite(adaptiveCtx.binaryThreshold)
+        ? adaptiveCtx.binaryThreshold
+        : 120;
+      const darkThreshold = clamp(Math.round(thresholdBase - 10), 72, 150);
+
+      const maskCols = new Uint8Array(width);
+      let colsToMask = 0;
+
+      for (let x = 0; x < width; x++) {
+        let darkCount = 0;
+        let transitions = 0;
+        let prevDark = null;
+
+        for (let y = analyzeStart; y < height; y++) {
+          const idx = (y * width + x) * 4;
+          const lum = (0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2]);
+          const isDark = lum <= darkThreshold;
+
+          if (isDark) darkCount++;
+          if (prevDark !== null && prevDark !== isDark) transitions++;
+          prevDark = isDark;
+        }
+
+        const columnRatio = analyzeBandHeight > 0 ? (darkCount / analyzeBandHeight) : 0;
+        const textLike = columnRatio >= 0.26 && columnRatio <= 0.92 && transitions >= 2;
+        const aggressiveTextLike = !!(adaptiveCtx && adaptiveCtx.bottomNoiseDetected) && columnRatio >= 0.20 && transitions >= 1;
+
+        if (textLike || aggressiveTextLike) {
+          maskCols[x] = 1;
+          colsToMask++;
+        }
+      }
+
+      if (colsToMask > 0) {
+        // Dilatação leve para cobrir traços de texto adjacentes
+        const expanded = new Uint8Array(width);
+        for (let x = 0; x < width; x++) {
+          if (!maskCols[x]) continue;
+          expanded[x] = 1;
+          if (x > 0) expanded[x - 1] = 1;
+          if (x < width - 1) expanded[x + 1] = 1;
+        }
+
+        for (let y = yStart; y < height; y++) {
+          for (let x = 0; x < width; x++) {
+            if (!expanded[x]) continue;
+            const idx = (y * width + x) * 4;
+            out[idx] = 255;
+            out[idx + 1] = 255;
+            out[idx + 2] = 255;
+            out[idx + 3] = 255;
+          }
+        }
+
+        return out;
+      }
+
+      const fallbackFullMask = !!(adaptiveCtx && adaptiveCtx.bottomBlackRatio > 0.34);
+      if (!fallbackFullMask) return out;
 
       for (let y = yStart; y < height; y++) {
         for (let x = 0; x < width; x++) {
@@ -5589,9 +5919,82 @@ async function scanQrFromCamera() {
       return { data: out, width: targetW, height: targetH };
     }
 
+    function upscaleImageDataCanvas(sourceData, width, height, scale = 1.5, maxPixels = MAX_UPSCALE_PIXELS) {
+      if (!sourceData || !width || !height || scale <= 1) {
+        return { data: new Uint8ClampedArray(sourceData || []), width, height };
+      }
+
+      let targetW = Math.max(1, Math.floor(width * scale));
+      let targetH = Math.max(1, Math.floor(height * scale));
+      const requestedPixels = targetW * targetH;
+
+      if (requestedPixels > maxPixels) {
+        const safeScale = Math.max(1, Math.sqrt(maxPixels / Math.max(1, width * height)));
+        targetW = Math.max(1, Math.floor(width * safeScale));
+        targetH = Math.max(1, Math.floor(height * safeScale));
+      }
+
+      if (targetW <= width && targetH <= height) {
+        return { data: new Uint8ClampedArray(sourceData), width, height };
+      }
+
+      if (!upscaleScratchSrcCanvas) {
+        upscaleScratchSrcCanvas = document.createElement('canvas');
+      }
+      if (!upscaleScratchDstCanvas) {
+        upscaleScratchDstCanvas = document.createElement('canvas');
+      }
+
+      upscaleScratchSrcCanvas.width = width;
+      upscaleScratchSrcCanvas.height = height;
+      upscaleScratchDstCanvas.width = targetW;
+      upscaleScratchDstCanvas.height = targetH;
+
+      const srcCtx = upscaleScratchSrcCanvas.getContext('2d', { willReadFrequently: true });
+      const dstCtx = upscaleScratchDstCanvas.getContext('2d', { willReadFrequently: true });
+      if (!srcCtx || !dstCtx) {
+        return upscaleImageData(sourceData, width, height, Math.min(scale, 2));
+      }
+
+      const srcImg = srcCtx.createImageData(width, height);
+      srcImg.data.set(sourceData);
+      srcCtx.putImageData(srcImg, 0, 0);
+
+      dstCtx.clearRect(0, 0, targetW, targetH);
+      dstCtx.imageSmoothingEnabled = true;
+      dstCtx.imageSmoothingQuality = 'high';
+      dstCtx.drawImage(upscaleScratchSrcCanvas, 0, 0, width, height, 0, 0, targetW, targetH);
+
+      const resized = dstCtx.getImageData(0, 0, targetW, targetH);
+      return { data: resized.data, width: targetW, height: targetH };
+    }
+
+    function extractCenteredRoi(imageData, ratio = 0.72) {
+      const width = imageData.width;
+      const height = imageData.height;
+      const size = Math.max(64, Math.floor(Math.min(width, height) * ratio));
+      const sx = Math.max(0, Math.floor((width - size) / 2));
+      const sy = Math.max(0, Math.floor((height - size) / 2));
+      const out = new Uint8ClampedArray(size * size * 4);
+
+      for (let y = 0; y < size; y++) {
+        for (let x = 0; x < size; x++) {
+          const srcIdx = ((sy + y) * width + (sx + x)) * 4;
+          const dstIdx = (y * size + x) * 4;
+          out[dstIdx] = imageData.data[srcIdx];
+          out[dstIdx + 1] = imageData.data[srcIdx + 1];
+          out[dstIdx + 2] = imageData.data[srcIdx + 2];
+          out[dstIdx + 3] = 255;
+        }
+      }
+
+      return { data: out, width: size, height: size };
+    }
+
     function decodeWithVariants(imageData, isDirtyMode = false, adaptiveCtx = null) {
       const width = imageData.width;
       const height = imageData.height;
+      const isMobileScan = isIOSDevice || isAndroidDevice;
       const contrast = toGrayscaleHighContrast(imageData);
       const binary = toAdaptiveBinary(imageData, adaptiveCtx);
       const upscaledOriginal = upscaleImageData(imageData.data, width, height, 2);
@@ -5601,34 +6004,57 @@ async function scanQrFromCamera() {
       const maskRatio = adaptiveCtx && Number.isFinite(adaptiveCtx.maskBottomRatio)
         ? adaptiveCtx.maskBottomRatio
         : 0.30;
-      const maskedBottom = maskBottomEdge(imageData.data, width, height, maskRatio);
+      const maskedBottom = maskBottomEdge(imageData.data, width, height, maskRatio, adaptiveCtx);
+      const strongerMaskRatio = clamp(maskRatio + 0.08, 0.22, 0.58);
+      const maskedBottomStrong = (isDirtyMode || (adaptiveCtx && adaptiveCtx.bottomNoiseDetected))
+        ? maskBottomEdge(imageData.data, width, height, strongerMaskRatio, adaptiveCtx)
+        : null;
 
       let variants = [];
 
       if (!isDirtyMode) {
-        // ⚡ Modo limpo: Original primeiro (rápido), depois variantes básicas
-        variants = [
-          { data: imageData.data, name: 'original' },
-          { data: contrast, name: 'contrast' },
-          { data: upscaledOriginal.data, name: 'upscaled-original', width: upscaledOriginal.width, height: upscaledOriginal.height },
-          { data: binary, name: 'binary' }
-        ];
+        // ⚡ Mobile: prioriza mascaramento inferior + alto contraste
+        variants = isMobileScan
+          ? [
+              { data: maskedBottom, name: 'masked-bottom' },
+              { data: contrast, name: 'contrast' },
+              { data: upscaledContrast.data, name: 'upscaled-contrast', width: upscaledContrast.width, height: upscaledContrast.height },
+              { data: upscaledOriginal.data, name: 'upscaled-original', width: upscaledOriginal.width, height: upscaledOriginal.height },
+              { data: binary, name: 'binary' },
+              { data: imageData.data, name: 'original' }
+            ]
+          : [
+              { data: imageData.data, name: 'original' },
+              { data: contrast, name: 'contrast' },
+              { data: upscaledOriginal.data, name: 'upscaled-original', width: upscaledOriginal.width, height: upscaledOriginal.height },
+              { data: binary, name: 'binary' },
+              { data: maskedBottom, name: 'masked-bottom' }
+            ];
       } else {
         // 🏭 Modo sujo: Estratégias agressivas primeiro
         console.log('[DEBUG_QR] ⚠️ Modo SUJO ativado - tentando estratégias agressivas');
         const equalized = equalizeHistogram(imageData);
         const aggressive = toAggressiveBinary(imageData, adaptiveCtx);
+        const denoised = denoiseImage(imageData);
+        const sharpened = sharpenImage(imageData);
+        const denoiseThenAggressive = toAggressiveBinary({ data: denoised, width, height }, adaptiveCtx);
+        const sharpenThenAggressive = toAggressiveBinary({ data: sharpened, width, height }, adaptiveCtx);
+        const upscaledAggressive = upscaleImageData(aggressive, width, height, 2);
         const maskedLowerLeft = maskLowerLeftNoise(imageData.data, width, height, 0.40, 0.40);
         
         variants = [
+          ...(maskedBottomStrong ? [{ data: maskedBottomStrong, name: 'masked-bottom-strong' }] : []),
+          { data: maskedBottom, name: 'masked-bottom' },
+          { data: contrast, name: 'contrast' },
+          { data: upscaledContrast.data, name: 'upscaled-contrast', width: upscaledContrast.width, height: upscaledContrast.height },
+          { data: denoiseThenAggressive, name: 'denoise-aggressive' },
+          { data: sharpenThenAggressive, name: 'sharpen-aggressive' },
           { data: equalized, name: 'equalized' },
           { data: aggressive, name: 'aggressive-binary' },
+          { data: upscaledAggressive.data, name: 'upscaled-aggressive', width: upscaledAggressive.width, height: upscaledAggressive.height },
           { data: maskedLowerLeft, name: 'masked-lower-left' },
           { data: upscaledOriginal.data, name: 'upscaled-original', width: upscaledOriginal.width, height: upscaledOriginal.height },
-          { data: upscaledContrast.data, name: 'upscaled-contrast', width: upscaledContrast.width, height: upscaledContrast.height },
-          { data: contrast, name: 'contrast' },
           { data: binary, name: 'binary' },
-          { data: maskedBottom, name: 'masked-bottom' },
           { data: imageData.data, name: 'original' }
         ];
       }
@@ -5662,19 +6088,32 @@ async function scanQrFromCamera() {
 
     function decodeMultiPass(ctx, width, height, isDirtyMode = false, adaptiveCtx = null) {
       const baseSize = Math.floor(Math.min(width, height));
+      const mobileScan = isIOSDevice || isAndroidDevice;
       // ✅ Passes otimizados para cobrir QR em diferentes posições/tamanhos
-      const scans = [
-        { ratio: 1.0, dx: 0, dy: 0 },
-        { ratio: 0.92, dx: 0, dy: 0 },
-        { ratio: 0.78, dx: 0.15, dy: -0.12 },
-        { ratio: 0.78, dx: -0.15, dy: 0.12 },
-        { ratio: 0.65, dx: 0, dy: 0 }
-      ];
+      const scans = mobileScan
+        ? [
+            { ratio: 0.92, dx: 0, dy: 0 },
+            { ratio: 1.0, dx: 0, dy: 0 },
+            { ratio: 0.86, dx: 0, dy: 0 },
+            { ratio: 0.78, dx: 0.15, dy: -0.12 },
+            { ratio: 0.78, dx: -0.15, dy: 0.12 },
+            { ratio: 0.65, dx: 0, dy: 0 }
+          ]
+        : [
+            { ratio: 1.0, dx: 0, dy: 0 },
+            { ratio: 0.92, dx: 0, dy: 0 },
+            { ratio: 0.78, dx: 0.15, dy: -0.12 },
+            { ratio: 0.78, dx: -0.15, dy: 0.12 },
+            { ratio: 0.65, dx: 0, dy: 0 }
+          ];
 
       if (isDirtyMode) {
         scans.push(
+          { ratio: 0.88, dx: 0.10, dy: 0 },
+          { ratio: 0.88, dx: -0.10, dy: 0 },
           { ratio: 0.72, dx: -0.20, dy: -0.15 },
-          { ratio: 0.72, dx: 0.20, dy: 0.15 }
+          { ratio: 0.72, dx: 0.20, dy: 0.15 },
+          { ratio: 0.58, dx: 0, dy: 0 }
         );
       }
 
@@ -5798,18 +6237,35 @@ async function scanQrFromCamera() {
         }
 
         if (caps?.zoom) {
-          const minZoom = Number(caps.zoom.min || 1);
-          const maxZoom = Number(caps.zoom.max || minZoom);
-          const targetZoom = isIOSDevice
-            ? Math.min(maxZoom, Math.max(minZoom, minZoom + ((maxZoom - minZoom) * 0.25)))
-            : Math.min(maxZoom, Math.max(minZoom, 1.6));
-          advanced.push({ zoom: targetZoom });
+          minZoomLevel = Number(caps.zoom.min || 1);
+          maxZoomLevel = Number(caps.zoom.max || minZoomLevel);
+          minZoomLevel = Math.max(1, minZoomLevel);
+          const zoomRange = Math.max(0, maxZoomLevel - minZoomLevel);
+
+          // Zoom mínimo: permitir ampla leitura natural
+          maxOperationalZoom = Math.min(maxZoomLevel, minZoomLevel + Math.min(0.15, zoomRange * 0.12));
+
+          // Começar com zoom mínimo para campo de visão máximo
+          const initialZoom = minZoomLevel;
+
+          currentZoomLevel = initialZoom;
+          advanced.push({ zoom: initialZoom });
+          console.log('[DEBUG_QR] 🔎 Zoom reduzido ao mínimo (leitura natural):', {
+            minZoomLevel,
+            maxZoomLevel,
+            maxOperationalZoom,
+            initialZoom
+          });
         }
 
         torchSupported = !!caps?.torch;
 
         if (advanced.length) {
           await activeTrack.applyConstraints({ advanced });
+        }
+        const trackSettings = activeTrack.getSettings?.();
+        if (trackSettings && Number.isFinite(trackSettings.zoom)) {
+          currentZoomLevel = Number(trackSettings.zoom);
         }
         console.log('[DEBUG_QR] 📹 Configurações de câmera aplicadas');
 
@@ -5853,8 +6309,13 @@ async function scanQrFromCamera() {
         ctx.imageSmoothingEnabled = false;
         ctx.drawImage(video, 0, 0);
 
-        const heavyStep = isIOSDevice ? 2 : (isAndroidDevice ? 2 : 1);
-        const shouldRunHeavy = frameTick <= 4 || frameTick % heavyStep === 0;
+        const dirtyStartFrame = isAndroidDevice ? 6 : 8;
+        const turboDirtyFrame = isAndroidDevice ? 16 : 20;
+        const isDirtyMode = frameTick > dirtyStartFrame;
+        const isTurboDirtyMode = frameTick > turboDirtyFrame;
+
+        const heavyStep = isTurboDirtyMode ? 1 : (isIOSDevice ? 2 : (isAndroidDevice ? 2 : 1));
+        const shouldRunHeavy = frameTick <= 4 || frameTick % heavyStep === 0 || isTurboDirtyMode;
 
         // 1) Tentativa nativa (Chrome/Android) - melhora taxa de leitura no S23
         // ⚠️ OTIMIZADO: Desabilitar em mobile lowend para economizar CPU
@@ -5887,8 +6348,6 @@ async function scanQrFromCamera() {
         }
 
         // 2) Fallback jsQR (mantém compatibilidade)
-        // ✅ Ativar modo sujo após 10 tentativas sem sucesso
-        const isDirtyMode = frameTick > 8;
 
         if (statsCtx) {
           statsCtx.drawImage(canvas, 0, 0, statsCanvas.width, statsCanvas.height);
@@ -5965,7 +6424,7 @@ async function scanQrFromCamera() {
 
         // 3) � ZXING INDUSTRIAL MODE - Estratégia multi-binarizer (Amazon/FedEx)
         const shouldTryZXing = !code && typeof ZXing !== 'undefined' && ZXing.QRCodeReader && 
-                   !isIOSDevice && (isDirtyMode ? frameTick % 3 === 0 : frameTick % 4 === 0);
+             !isIOSDevice && (isDirtyMode ? frameTick % 2 === 0 : frameTick % 4 === 0);
         
         if (shouldTryZXing) {
           try {
@@ -6121,8 +6580,28 @@ async function scanQrFromCamera() {
           
           // ✅ Calcular tamanho estimado do QR para detectar distância
           const qrWidth = code.location.topRightCorner.x - code.location.topLeftCorner.x;
-          const tooClose = qrWidth > frameSize * 0.8; // QR muito grande = muito perto
-          const tooFar = qrWidth < frameSize * 0.4;   // QR muito pequeno = muito longe
+          const tooClose = qrWidth > frameSize * 0.92; // QR muito grande = muito perto
+          const tooFar = qrWidth < frameSize * 0.28;   // QR muito pequeno = muito longe
+
+          if (caps?.zoom && activeTrack && Number.isFinite(currentZoomLevel) && (frameTick - lastZoomAdjustTick) >= 8) {
+            const zoomStep = Math.max(0.03, (maxOperationalZoom - minZoomLevel) * 0.18);
+            let nextZoom = currentZoomLevel;
+
+            if (tooClose) {
+              nextZoom = Math.max(minZoomLevel, currentZoomLevel - (zoomStep * 0.5));
+            } else if (tooFar && !isDirtyMode) {
+              nextZoom = Math.min(maxOperationalZoom, currentZoomLevel + (zoomStep * 0.3));
+            }
+
+            if (Math.abs(nextZoom - currentZoomLevel) >= 0.02) {
+              activeTrack.applyConstraints({ advanced: [{ zoom: nextZoom }] })
+                .then(() => {
+                  currentZoomLevel = nextZoom;
+                  lastZoomAdjustTick = frameTick;
+                })
+                .catch(() => {});
+            }
+          }
           
           // ✅ Detectar se câmera está parada ou movendo (baseado em variação de tamanho)
           const sizeChange = Math.abs(qrWidth - lastQRSize) / Math.max(lastQRSize, 1);
@@ -6140,7 +6619,7 @@ async function scanQrFromCamera() {
               isStable: !isMoving,
               timeRemaining: 0
             });
-            markDetected(code.data, '✅ Posição correta — aguarde...');
+            markDetected(code.data, 'Posição ideal, confirmando leitura...');
             setScannerUiState('busy', 'QR detectado, validando');
           } else {
             // QR detectado mas fora de posição
@@ -6148,11 +6627,11 @@ async function scanQrFromCamera() {
             stableCount = sameCode ? stableCount + 1 : 1;
             lastCodeData = code.data;
 
-            frame.style.borderColor = '#f59e0b';
-            frame.style.boxShadow = '';
+            setGuideColor('#ffd60a');
+            frame.style.boxShadow = '0 0 16px rgba(255,214,10,.35)';
             scanLine.style.animationPlayState = 'running';
             const remaining = Math.max(0, 5 - Math.floor(frameTick / 10));
-            statusText.textContent = '🟡 QR detectado — centralize melhor ou aguarde ' + remaining + 's';
+            statusText.textContent = 'QR detectado — ajuste o enquadramento (' + remaining + 's)';
             
             // Determinar qualidade do QR baseado em tentativas
             let quality = 'Boa';
@@ -6187,10 +6666,10 @@ async function scanQrFromCamera() {
           stableCount = 0;
           lastCodeData = '';
           decodedStableCount = 0;
-          frame.style.borderColor = '#ef4444';
-          frame.style.boxShadow = '';
+          setGuideColor('#ffd60a');
+          frame.style.boxShadow = '0 0 12px rgba(255,255,255,.15)';
           scanLine.style.animationPlayState = 'running';
-          statusText.textContent = '🔴 Centralize o QR Code';
+          statusText.textContent = 'Alinhe o QR dentro da moldura';
           
           // Atualizar feedback - não detectado
           const remaining = Math.max(0, 2 - Math.floor(frameTick / 20));
@@ -6202,6 +6681,27 @@ async function scanQrFromCamera() {
             isStable:false,
             timeRemaining: remaining
           });
+
+          if (caps?.zoom && activeTrack && Number.isFinite(currentZoomLevel) && frameTick % 30 === 0) {
+            const resetZoom = Math.max(minZoomLevel, minZoomLevel + 0.02);
+            if (currentZoomLevel > (resetZoom + 0.04)) {
+              activeTrack.applyConstraints({ advanced: [{ zoom: resetZoom }] })
+                .then(() => {
+                  currentZoomLevel = resetZoom;
+                  lastZoomAdjustTick = frameTick;
+                })
+                .catch(() => {});
+            }
+          }
+
+          if (!autoStaticTriggered && isDirtyMode && frameTick >= 36) {
+            autoStaticTriggered = true;
+            console.warn('[DEBUG_QR] ⚠️ Auto fallback: captura estática acionada por demora na leitura');
+            handleStaticCapture().catch(() => {
+              autoStaticTriggered = false;
+            });
+          }
+
           setScannerUiState('active', 'Scanner ativo');
         }
         } finally {

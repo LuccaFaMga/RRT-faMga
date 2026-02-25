@@ -1872,6 +1872,89 @@ function getReviewerMetricsRange_Web(startDate, endDate) {
   }
 }
 
+function sendProactiveNotifications_Web(payload) {
+  try {
+    const list = Array.isArray(payload?.notifications) ? payload.notifications : [];
+    const notifications = list
+      .filter((n) => n && n.titulo && n.descricao)
+      .slice(0, 10);
+
+    if (!notifications.length) {
+      return {
+        status: 'SUCESSO',
+        message: 'Nenhuma notificação pendente para envio.',
+        sentCount: 0,
+        sentIds: [],
+        sentAt: new Date().toISOString()
+      };
+    }
+
+    if (typeof sendProactiveInternalDigestEmail === 'function') {
+      const digestResp = sendProactiveInternalDigestEmail({
+        notifications,
+        origin: payload?.origin || 'dashboard_estoque'
+      });
+
+      if (digestResp && digestResp.status === 'SUCESSO') {
+        return {
+          status: 'SUCESSO',
+          message: digestResp.message || 'Notificações enviadas via digest interno.',
+          sentCount: notifications.length,
+          sentIds: notifications.map((n) => n.id).filter(Boolean),
+          sentAt: new Date().toISOString()
+        };
+      }
+    }
+
+    const recipients = Array.from(new Set([
+      CONFIG?.EMAIL?.ADMIN,
+      CONFIG?.EMAIL?.SUPERVISOR,
+      CONFIG?.EMAIL?.COMPRAS
+    ].filter(Boolean)));
+
+    if (!recipients.length) {
+      throw new Error('Destinatários internos não configurados.');
+    }
+
+    const rows = notifications.map((item, idx) => {
+      const ordem = idx + 1;
+      return '<li><b>#' + ordem + ' [' + String(item.severidade || '').toUpperCase() + ']</b> ' +
+        String(item.titulo || '') +
+        '<br><span style="color:#555;">' + String(item.descricao || '') + '</span>' +
+        '<br><span style="color:#111;"><b>Ação:</b> ' + String(item.acaoRecomendada || '') + '</span></li>';
+    }).join('');
+
+    MailApp.sendEmail({
+      to: recipients.join(','),
+      subject: '🚨 RRT | Alertas Proativos (' + notifications.length + ')',
+      htmlBody:
+        '<div style="font-family:Arial,sans-serif;line-height:1.5;">' +
+          '<h3>Notificações proativas do Dashboard RRT</h3>' +
+          '<p>Origem: ' + String(payload?.origin || 'dashboard_estoque') + '</p>' +
+          '<ol>' + rows + '</ol>' +
+          '<p style="font-size:12px;color:#666;">Mensagem automática para acionamento interno.</p>' +
+        '</div>',
+      name: CONFIG?.EMAIL?.SENDER_NAME || 'Sistema RRT'
+    });
+
+    return {
+      status: 'SUCESSO',
+      message: 'Notificações enviadas com fallback de endpoint.',
+      sentCount: notifications.length,
+      sentIds: notifications.map((n) => n.id).filter(Boolean),
+      sentAt: new Date().toISOString()
+    };
+  } catch (error) {
+    Logger.log('[APP] ❌ Erro em sendProactiveNotifications_Web: ' + error.message);
+    return {
+      status: 'ERRO',
+      message: error.message,
+      sentCount: 0,
+      sentIds: []
+    };
+  }
+}
+
 /**
  * =========================================================
  * 📊 KPI DASHBOARD - Métricas em Tempo Real

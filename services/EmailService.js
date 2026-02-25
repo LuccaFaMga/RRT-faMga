@@ -304,9 +304,92 @@ function sendComprasEmail(mainData, defects, docs) {
     }
 }
 
+function sendProactiveInternalDigestEmail(payload) {
+    const fn = "sendProactiveInternalDigestEmail_v1";
+
+    try {
+        const notifications = Array.isArray(payload?.notifications) ? payload.notifications : [];
+        if (!notifications.length) {
+            return { status: "SUCESSO", message: "Sem notificações para envio." };
+        }
+
+        const recipients = Array.from(new Set([
+            CONFIG?.EMAIL?.ADMIN,
+            CONFIG?.EMAIL?.SUPERVISOR,
+            CONFIG?.EMAIL?.COMPRAS
+        ].filter(Boolean)));
+
+        if (!recipients.length) {
+            throw new Error("Nenhum destinatário interno configurado para digest proativo.");
+        }
+
+        const rows = notifications.map((item, index) => {
+            const ordem = index + 1;
+            const sev = String(item?.severidade || "media").toUpperCase();
+            const title = String(item?.titulo || "Alerta sem título");
+            const desc = String(item?.descricao || "Sem descrição.");
+            const action = String(item?.acaoRecomendada || "Sem ação recomendada.");
+            const itemId = item?.id ? String(item.id) : "";
+
+            return `
+                <tr>
+                    <td style="padding:8px;border:1px solid #ddd;">${ordem}</td>
+                    <td style="padding:8px;border:1px solid #ddd;"><b>${sev}</b></td>
+                    <td style="padding:8px;border:1px solid #ddd;">${title}${itemId ? `<br><small>ID: ${itemId}</small>` : ""}</td>
+                    <td style="padding:8px;border:1px solid #ddd;">${desc}</td>
+                    <td style="padding:8px;border:1px solid #ddd;">${action}</td>
+                </tr>
+            `;
+        }).join("");
+
+        const subject = `🚨 RRT | Digest Proativo (${notifications.length})`;
+        const htmlBody = `
+            <div style="font-family:Arial,sans-serif;color:#1f2937;">
+                <h3 style="margin:0 0 12px 0;">Notificações Proativas de Estoque</h3>
+                <p style="margin:0 0 10px 0;">Origem: <b>${String(payload?.origin || "dashboard_estoque")}</b></p>
+                <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                    <thead>
+                        <tr style="background:#f3f4f6;">
+                            <th style="padding:8px;border:1px solid #ddd;">#</th>
+                            <th style="padding:8px;border:1px solid #ddd;">Severidade</th>
+                            <th style="padding:8px;border:1px solid #ddd;">Título</th>
+                            <th style="padding:8px;border:1px solid #ddd;">Descrição</th>
+                            <th style="padding:8px;border:1px solid #ddd;">Ação Recomendada</th>
+                        </tr>
+                    </thead>
+                    <tbody>${rows}</tbody>
+                </table>
+                <p style="margin-top:12px;font-size:12px;color:#6b7280;">Envio automático para acompanhamento interno.</p>
+            </div>
+        `;
+
+        MailApp.sendEmail({
+            to: recipients.join(","),
+            subject,
+            htmlBody,
+            name: CONFIG?.EMAIL?.SENDER_NAME || "Sistema RRT"
+        });
+
+        LogApp.log(`[${fn}] Digest proativo enviado para ${recipients.join(",")}.`, LogApp.LEVELS.INFO);
+        return {
+            status: "SUCESSO",
+            message: "Digest proativo enviado com sucesso.",
+            recipients,
+            total: notifications.length
+        };
+    } catch (error) {
+        LogApp.log(`[${fn}] ERRO: ${error}`, LogApp.LEVELS.ERROR);
+        return {
+            status: "ERRO",
+            message: error.message
+        };
+    }
+}
+
 /* ============================================================
     EXPORTAÇÃO GLOBAL
    ============================================================ */
 var sendRevisaoConcluidaEmail = sendRevisaoConcluidaEmail;
 var sendSupervisorApprovalEmail = sendSupervisorApprovalEmail;
 var sendComprasEmail = sendComprasEmail;
+var sendProactiveInternalDigestEmail = sendProactiveInternalDigestEmail;

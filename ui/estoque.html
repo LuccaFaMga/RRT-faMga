@@ -1184,7 +1184,7 @@ body {
         <div>
           <div style="font-size: 12px; opacity: 0.9; margin-bottom: 4px;"><span class="icon-error"></span>Taxa Reprovacao</div>
           <div style="font-size: 28px; font-weight: 700;" id="kpiReprovacao">0%</div>
-          <div style="font-size: 12px; opacity: 0.8; margin-top: 4px;">Mes atual</div>
+          <div style="font-size: 12px; opacity: 0.85; margin-top: 4px;" id="kpiReprovacaoDeltaTop">Δ 0.0% vs período anterior</div>
         </div>
       </div>
     </div>
@@ -1194,7 +1194,7 @@ body {
         <div>
           <div style="font-size: 12px; opacity: 0.9; margin-bottom: 4px;"><span class="icon-warning"></span>Defeitos/100m</div>
           <div style="font-size: 28px; font-weight: 700;" id="kpiDefeitos100m">0</div>
-          <div style="font-size: 12px; opacity: 0.8; margin-top: 4px;">Mes atual</div>
+          <div style="font-size: 12px; opacity: 0.85; margin-top: 4px;" id="kpiDefeitos100mDeltaTop">Δ 0.0% vs período anterior</div>
         </div>
       </div>
     </div>
@@ -1204,7 +1204,7 @@ body {
         <div>
           <div style="font-size: 12px; opacity: 0.9; margin-bottom: 4px;"><span class="icon-clock"></span>Pendencias</div>
           <div style="font-size: 28px; font-weight: 700;" id="kpiPendenciasPct">0%</div>
-          <div style="font-size: 12px; opacity: 0.8; margin-top: 4px;">Mes atual</div>
+          <div style="font-size: 12px; opacity: 0.85; margin-top: 4px;" id="kpiPendenciasDeltaTop">Δ 0.0% vs período anterior</div>
         </div>
       </div>
     </div>
@@ -1218,6 +1218,13 @@ body {
         </div>
       </div>
     </div>
+  </div>
+
+  <div id="kpiAuditTrail" style="margin: -8px 20px 18px; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg-secondary); color: var(--text-secondary); font-size: 12px;">
+    Rastreabilidade KPI: aguardando cálculo inicial.
+  </div>
+  <div id="proactiveNotificationStatus" style="margin: -10px 20px 16px; color: var(--text-muted); font-size: 12px;">
+    Notificações proativas: aguardando avaliação de gatilhos.
   </div>
 
   <!-- TABS -->
@@ -1234,6 +1241,7 @@ body {
       <span class="tab-badge">0</span>
     </button>
     <button class="tab-btn" data-tab="estoque-atual" onclick="switchTab('estoque-atual', this)"><span class="icon-box"></span>Estoque Atual</button>
+    <button class="tab-btn" data-tab="reposicao-risco" onclick="switchTab('reposicao-risco', this)"><span class="icon-warning"></span>Reposição/Risco</button>
     <button class="tab-btn" data-tab="corte-tecidos" onclick="switchTab('corte-tecidos', this)">✂️ Corte de Tecidos</button>
     <button class="tab-btn" data-tab="acompanhamento-compras" onclick="switchTab('acompanhamento-compras', this)"><span class="icon-cart"></span>Acompanhamento Compras</button>
     <button class="tab-btn" data-tab="metricas-qualidade" onclick="switchTab('metricas-qualidade', this)"><span class="icon-stats"></span>Métricas de Qualidade</button>
@@ -1244,6 +1252,15 @@ body {
     <div style="margin-bottom: 24px;">
       <h2 style="font-size: 20px; font-weight: 700; margin-bottom: 8px;">📊 Dashboard de Controle de Qualidade</h2>
       <p style="color: var(--text-secondary); font-size: 14px;">Visão geral do status de todos os tecidos no sistema</p>
+      <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 12px;">
+        <label for="periodoVisaoGeral" style="font-size: 12px; color: var(--text-muted); font-weight: 600;">Período da visão:</label>
+        <select id="periodoVisaoGeral" onchange="updateStats(allRolos)" style="padding: 8px; border: 1px solid var(--border); border-radius: 6px; font-size: 13px;">
+          <option value="7">7 dias</option>
+          <option value="30" selected>30 dias</option>
+          <option value="90">90 dias</option>
+        </select>
+        <span id="visaoGeralPeriodoInfo" style="font-size: 12px; color: var(--text-muted);">Comparando com o período anterior.</span>
+      </div>
     </div>
     
     <!-- KPIs Principais -->
@@ -1251,7 +1268,7 @@ body {
       <div class="card">
         <h3><span class="icon-error"></span>Taxa de Reprovacao</h3>
         <div class="card-value" id="taxaReprovacao">0%</div>
-        <div class="card-subtitle">mes atual</div>
+        <div class="card-subtitle"><span id="taxaReprovacaoPeriodoLabel">últimos 30 dias</span> · <span id="taxaReprovacaoDelta">vs período anterior: 0.0 pp</span></div>
       </div>
       <div class="card">
         <h3><span class="icon-warning"></span>Defeitos por 100m</h3>
@@ -1261,7 +1278,7 @@ body {
       <div class="card">
         <h3><span class="icon-clock"></span>Pendencias</h3>
         <div class="card-value" id="pendenciasPct">0%</div>
-        <div class="card-subtitle">mes atual</div>
+        <div class="card-subtitle"><span id="pendenciasPeriodoLabel">últimos 30 dias</span> · <span id="pendenciasDelta">vs período anterior: 0.0 pp</span></div>
       </div>
       <div class="card">
         <h3>⏱️ Tempo Medio de Revisao</h3>
@@ -1503,6 +1520,70 @@ body {
     </div>
   </div>
 
+  <!-- TAB: REPOSIÇÃO / RISCO DE RUPTURA -->
+  <div id="reposicao-risco" class="tab-content">
+    <div style="margin-bottom: 24px;">
+      <h2 style="font-size: 20px; font-weight: 700; margin-bottom: 8px;"><span class="icon-warning"></span>Reposição e Risco de Ruptura</h2>
+      <p style="color: var(--text-secondary); font-size: 14px;">Itens críticos de estoque com sugestão inicial de compra por cobertura.</p>
+    </div>
+
+    <div style="background: var(--bg-secondary); padding: 16px; border-radius: 8px; margin-bottom: 20px;">
+      <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
+        <div>
+          <label style="font-size: 12px; color: var(--text-muted); display: block; margin-bottom: 4px;">Tipo:</label>
+          <select id="reposicaoFiltroTipo" style="padding: 8px; border: 1px solid var(--border); border-radius: 6px; font-size: 13px; min-width: 150px;">
+            <option value="">Todos</option>
+            <option value="PLANO">Tecido Plano</option>
+            <option value="MALHA">Malha</option>
+          </select>
+        </div>
+        <div>
+          <label style="font-size: 12px; color: var(--text-muted); display: block; margin-bottom: 4px;">Fornecedor:</label>
+          <input type="text" id="reposicaoFiltroFornecedor" placeholder="Nome do fornecedor" style="padding: 8px; border: 1px solid var(--border); border-radius: 6px; font-size: 13px; min-width: 220px;">
+        </div>
+        <button class="btn btn-primary" onclick="aplicarFiltrosReposicao()">🔍 Filtrar</button>
+        <button class="btn btn-secondary" onclick="limparFiltrosReposicao()"><span class="icon-refresh"></span> Limpar</button>
+        <button class="btn btn-success" onclick="exportarListaReposicaoCritica()" style="margin-left: auto;">📥 Exportar Lista Crítica</button>
+      </div>
+    </div>
+
+    <div class="grid" style="margin-bottom: 20px;">
+      <div class="card">
+        <h3>🚨 Itens Críticos</h3>
+        <div class="card-value" id="reposicaoTotalCriticos">0</div>
+        <div class="card-subtitle">risco alto de ruptura</div>
+      </div>
+      <div class="card">
+        <h3>⚠️ Itens em Alerta</h3>
+        <div class="card-value" id="reposicaoTotalAlerta">0</div>
+        <div class="card-subtitle">monitoramento de reposição</div>
+      </div>
+      <div class="card">
+        <h3>🧾 Sugestões de Compra</h3>
+        <div class="card-value" id="reposicaoSugestoesAtivas">0</div>
+        <div class="card-subtitle">itens com ação recomendada</div>
+      </div>
+      <div class="card">
+        <h3>📦 Volume Sugerido</h3>
+        <div class="card-value" id="reposicaoVolumeSugerido">0</div>
+        <div class="card-subtitle">soma dos itens filtrados</div>
+      </div>
+    </div>
+
+    <div id="reposicaoLista" class="loading">
+      <div class="spinner"></div>
+      <p>Carregando análise de risco de ruptura...</p>
+    </div>
+
+    <div style="background: var(--bg-secondary); border-radius: 8px; padding: 16px; margin-top: 16px;">
+      <h3 style="font-size: 14px; font-weight: 600; margin-bottom: 12px;">🏭 Ranking Consolidado por Fornecedor</h3>
+      <div id="reposicaoRankingFornecedor" class="loading">
+        <div class="spinner"></div>
+        <p>Calculando ranking de risco por fornecedor...</p>
+      </div>
+    </div>
+  </div>
+
   <!-- TAB: CORTE DE TECIDOS -->
   <div id="corte-tecidos" class="tab-content">
     <div style="margin-bottom: 24px;">
@@ -1604,10 +1685,29 @@ body {
           <label style="font-size: 12px; color: var(--text-muted); display: block; margin-bottom: 4px;">Período:</label>
           <input type="date" id="dataInicioCompras" style="padding: 8px; border: 1px solid var(--border); border-radius: 6px; font-size: 13px;">
         </div>
+        <div>
+          <label style="font-size: 12px; color: var(--text-muted); display: block; margin-bottom: 4px;">Auto-refresh:</label>
+          <select id="comprasRefreshInterval" onchange="onComprasRefreshIntervalChange()" style="padding: 8px; border: 1px solid var(--border); border-radius: 6px; font-size: 13px;">
+            <option value="0">Desativado</option>
+            <option value="30000">30s</option>
+            <option value="45000" selected>45s</option>
+            <option value="60000">60s</option>
+          </select>
+        </div>
         <button class="btn btn-primary" onclick="filtrarCompras()">🔍 Filtrar</button>
         <button class="btn btn-secondary" onclick="limparFiltrosCompras()"><span class="icon-refresh"></span> Limpar</button>
         <button class="btn btn-success" onclick="exportarDadosCompras()" style="margin-left: auto;">📥 Exportar</button>
       </div>
+    </div>
+
+    <div id="comprasFiltroInfo" style="margin: -8px 0 16px; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg-secondary); color: var(--text-secondary); font-size: 12px; font-weight: 600;">
+      Exibindo visão total de compras.
+    </div>
+
+    <div id="comprasUpdateStamp" style="margin: -8px 0 16px; color: var(--text-muted); font-size: 12px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px;">
+      <span id="comprasUpdateText">Última atualização: --</span>
+      <span id="comprasRefreshStatus" style="padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border); background: var(--bg-secondary); color: var(--text-secondary); font-weight: 600;">Auto-refresh: --</span>
+      <span id="comprasAutoRefreshLastRun" style="padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border); background: var(--bg-secondary); color: var(--text-secondary); font-weight: 600;">Último auto-refresh: --</span>
     </div>
 
     <!-- Métricas de Compras -->
@@ -1728,8 +1828,17 @@ let allRolos = [];
 let allCompras = [];
 let allAguardando = [];
 let allRolosConsolidated = []; // 🎯 Consolidado: rolos de TODOS os status para gráficos e análises
+let comprasTotalReferencia = 0;
+let reposicaoDadosCriticos = [];
 
 let comprasAutoRefreshTimer = null;
+let comprasAutoRefreshIntervalMs = 45000;
+const COMPRAS_AUTO_REFRESH_KEY = 'compras-auto-refresh-ms';
+const ESTOQUE_FILTERS_KEY = 'estoque-filters-state';
+const PROACTIVE_NOTIFICATIONS_KEY = 'estoque-proactive-notifications-v1';
+const PROACTIVE_DISPATCH_COOLDOWN_KEY = 'estoque-proactive-last-dispatch-ts';
+const PROACTIVE_DISPATCH_COOLDOWN_MS = 5 * 60 * 1000;
+const PROACTIVE_DISPATCH_BATCH_SIZE = 6;
 
 // Paginação e filtragem de estoque
 let estoqueAtualPagina = 1;
@@ -1783,9 +1892,156 @@ function getCachedConsolidation() {
 document.addEventListener('DOMContentLoaded', function() {
   console.log('[ESTOQUE] 🚀 Dashboard iniciado');
   loadTheme();
+  loadComprasAutoRefreshSettings();
+  loadSavedFiltersToInputs();
+  bindFilterPersistenceEvents();
   loadAllData();
   loadCompanyLogo();
 });
+
+function getSavedFiltersState() {
+  try {
+    const raw = localStorage.getItem(ESTOQUE_FILTERS_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch (e) {
+    return {};
+  }
+}
+
+function saveFilterSection(sectionName, payload) {
+  const current = getSavedFiltersState();
+  current[sectionName] = payload;
+  localStorage.setItem(ESTOQUE_FILTERS_KEY, JSON.stringify(current));
+}
+
+function loadSavedFiltersToInputs() {
+  const state = getSavedFiltersState();
+
+  const visaoPeriodo = document.getElementById('periodoVisaoGeral');
+  if (visaoPeriodo && state.visaoGeral?.periodo) {
+    visaoPeriodo.value = String(state.visaoGeral.periodo);
+  }
+
+  const periodoMetricas = document.getElementById('periodoMetricas');
+  if (periodoMetricas && state.metricas?.periodo) {
+    periodoMetricas.value = String(state.metricas.periodo);
+  }
+
+  const buscaRapida = document.getElementById('buscaRapida');
+  const filtroTipoEstoque = document.getElementById('filtroTipoEstoque');
+  const filtroLocalizacao = document.getElementById('filtroLocalizacao');
+  if (buscaRapida && state.estoqueBusca?.busca != null) buscaRapida.value = state.estoqueBusca.busca;
+  if (filtroTipoEstoque && state.estoqueBusca?.tipo != null) filtroTipoEstoque.value = state.estoqueBusca.tipo;
+  if (filtroLocalizacao && state.estoqueBusca?.localizacao != null) filtroLocalizacao.value = state.estoqueBusca.localizacao;
+
+  const filtroTipoTecido = document.getElementById('filtroTipoTecido');
+  const filtroPrioridade = document.getElementById('filtroPrioridade');
+  if (filtroTipoTecido && state.analise?.tipoTecido != null) filtroTipoTecido.value = state.analise.tipoTecido;
+  if (filtroPrioridade && state.analise?.prioridade != null) filtroPrioridade.value = state.analise.prioridade;
+
+  const filtroStatusCompras = document.getElementById('filtroStatusCompras');
+  const filtroFornecedorCompras = document.getElementById('filtroFornecedorCompras');
+  const dataInicioCompras = document.getElementById('dataInicioCompras');
+  if (filtroStatusCompras && state.compras?.status != null) filtroStatusCompras.value = state.compras.status;
+  if (filtroFornecedorCompras && state.compras?.fornecedor != null) filtroFornecedorCompras.value = state.compras.fornecedor;
+  if (dataInicioCompras && state.compras?.dataInicio != null) dataInicioCompras.value = state.compras.dataInicio;
+
+  const reposicaoTipo = document.getElementById('reposicaoFiltroTipo');
+  const reposicaoFornecedor = document.getElementById('reposicaoFiltroFornecedor');
+  if (reposicaoTipo && state.reposicao?.tipo != null) reposicaoTipo.value = state.reposicao.tipo;
+  if (reposicaoFornecedor && state.reposicao?.fornecedor != null) reposicaoFornecedor.value = state.reposicao.fornecedor;
+}
+
+function bindFilterPersistenceEvents() {
+  const visaoPeriodo = document.getElementById('periodoVisaoGeral');
+  if (visaoPeriodo) {
+    visaoPeriodo.addEventListener('change', () => {
+      saveFilterSection('visaoGeral', { periodo: visaoPeriodo.value });
+    });
+  }
+
+  const periodoMetricas = document.getElementById('periodoMetricas');
+  if (periodoMetricas) {
+    periodoMetricas.addEventListener('change', () => {
+      saveFilterSection('metricas', { periodo: periodoMetricas.value });
+    });
+  }
+}
+
+function applySavedFiltersAfterDataLoad() {
+  const state = getSavedFiltersState();
+
+  const fornecedorEstoque = document.getElementById('filtroFornecedor');
+  if (fornecedorEstoque && state.estoqueBusca?.fornecedor != null) {
+    fornecedorEstoque.value = state.estoqueBusca.fornecedor;
+  }
+
+  const visaoPeriodo = document.getElementById('periodoVisaoGeral');
+  if (visaoPeriodo && state.visaoGeral?.periodo) {
+    visaoPeriodo.value = String(state.visaoGeral.periodo);
+  }
+
+  const hasBuscaEstoque = !!(
+    state.estoqueBusca?.busca ||
+    state.estoqueBusca?.tipo ||
+    state.estoqueBusca?.fornecedor ||
+    state.estoqueBusca?.localizacao
+  );
+  if (hasBuscaEstoque) {
+    buscarEstoque();
+  }
+
+  if (state.analise && (state.analise.tipoTecido || state.analise.prioridade)) {
+    aplicarFiltrosAnalise();
+  }
+
+  if (state.compras && (state.compras.status || state.compras.fornecedor || state.compras.dataInicio)) {
+    filtrarCompras({ silent: true });
+  }
+
+  if (state.reposicao && (state.reposicao.tipo || state.reposicao.fornecedor)) {
+    aplicarFiltrosReposicao();
+  }
+
+  if (state.metricas?.periodo) {
+    atualizarMetricas();
+  }
+}
+
+function loadComprasAutoRefreshSettings() {
+  const select = document.getElementById('comprasRefreshInterval');
+  const raw = localStorage.getItem(COMPRAS_AUTO_REFRESH_KEY);
+  const parsed = Number(raw);
+  const validValues = [0, 30000, 45000, 60000];
+
+  comprasAutoRefreshIntervalMs = validValues.includes(parsed) ? parsed : 45000;
+
+  if (select) {
+    select.value = String(comprasAutoRefreshIntervalMs);
+  }
+
+  updateComprasAutoRefreshIndicator(false);
+}
+
+function onComprasRefreshIntervalChange() {
+  const select = document.getElementById('comprasRefreshInterval');
+  if (!select) return;
+
+  const parsed = Number(select.value);
+  const validValues = [0, 30000, 45000, 60000];
+  comprasAutoRefreshIntervalMs = validValues.includes(parsed) ? parsed : 45000;
+
+  localStorage.setItem(COMPRAS_AUTO_REFRESH_KEY, String(comprasAutoRefreshIntervalMs));
+  scheduleComprasRefresh(allCompras);
+  updateComprasAutoRefreshIndicator(false);
+
+  if (comprasAutoRefreshIntervalMs <= 0) {
+    showToast('Auto-refresh de Compras desativado.', 'info');
+  } else {
+    showToast('Auto-refresh de Compras ajustado para ' + Math.round(comprasAutoRefreshIntervalMs / 1000) + 's.', 'success');
+  }
+}
 
 function loadCompanyLogo() {
   const logoImg = document.getElementById('companyLogo');
@@ -1839,8 +2095,20 @@ function switchTab(tabName, btn) {
   
   console.log('[ESTOQUE] 📂 Aba:', tabName);
 
+  if (tabName === 'reposicao-risco') {
+    renderReposicaoRisco(allRolos || []);
+  }
+
   if (tabName === 'acompanhamento-compras') {
-    loadCompras();
+    renderComprasByCurrentFilters({
+      contextLabel: 'aba de compras aberta'
+    });
+    scheduleComprasRefresh(allCompras);
+    loadCompras({
+      silent: true,
+      contextLabel: 'sincronização inicial',
+      source: 'sync'
+    });
   } else {
     if (comprasAutoRefreshTimer) {
       clearTimeout(comprasAutoRefreshTimer);
@@ -1852,6 +2120,208 @@ function switchTab(tabName, btn) {
 function isComprasTabActive() {
   const tab = document.getElementById('acompanhamento-compras');
   return !!(tab && tab.classList.contains('active'));
+}
+
+function getVisaoGeralPeriodDays() {
+  const select = document.getElementById('periodoVisaoGeral');
+  const parsed = Number(select ? select.value : 30);
+  return [7, 30, 90].includes(parsed) ? parsed : 30;
+}
+
+function updateVisaoGeralPeriodLabels(days) {
+  const labelText = 'últimos ' + days + ' dias';
+  const taxaLabel = document.getElementById('taxaReprovacaoPeriodoLabel');
+  const pendLabel = document.getElementById('pendenciasPeriodoLabel');
+  const periodoInfo = document.getElementById('visaoGeralPeriodoInfo');
+
+  if (taxaLabel) taxaLabel.textContent = labelText;
+  if (pendLabel) pendLabel.textContent = labelText;
+  if (periodoInfo) periodoInfo.textContent = 'Comparando com os ' + days + ' dias anteriores.';
+}
+
+function applyDeltaText(elemId, deltaValue, betterWhenLower = false) {
+  const el = document.getElementById(elemId);
+  if (!el) return;
+
+  const sign = deltaValue > 0 ? '+' : '';
+  el.textContent = 'vs período anterior: ' + sign + deltaValue.toFixed(1) + ' pp';
+
+  if (deltaValue === 0) {
+    el.style.color = 'var(--text-secondary)';
+    return;
+  }
+
+  const improved = betterWhenLower ? deltaValue < 0 : deltaValue > 0;
+  el.style.color = improved ? 'var(--success)' : 'var(--danger)';
+}
+
+function formatPercentVariation(currentValue, previousValue) {
+  if (previousValue === 0) {
+    if (currentValue === 0) return 'Δ 0.0% vs período anterior';
+    return 'Δ N/D vs período anterior';
+  }
+
+  const deltaPct = ((currentValue - previousValue) / previousValue) * 100;
+  const sign = deltaPct > 0 ? '+' : '';
+  return 'Δ ' + sign + deltaPct.toFixed(1) + '% vs período anterior';
+}
+
+function updateKpiTraceability(payload) {
+  const el = document.getElementById('kpiAuditTrail');
+  if (!el) return;
+
+  const info = payload || {};
+  const momento = new Date().toLocaleString('pt-BR', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit'
+  });
+
+  let criticidade = 'Baixa';
+  if ((info.taxaReprovacaoNum || 0) >= 12 || (info.pendenciasPctNum || 0) >= 25) criticidade = 'Alta';
+  else if ((info.taxaReprovacaoNum || 0) >= 8 || (info.pendenciasPctNum || 0) >= 15) criticidade = 'Moderada';
+
+  const fonte = 'estoque + supervisor + compras';
+  const texto =
+    'Rastreabilidade KPI: fonte [' + fonte + '] · janela [' + (info.periodoDias || 30) + ' dias] · base [' + (info.baseTotal || 0) + ' registros] · criticidade [' + criticidade + '] · calculado em [' + momento + '].';
+
+  el.textContent = texto;
+}
+
+function getProactiveNotificationQueue() {
+  try {
+    const raw = localStorage.getItem(PROACTIVE_NOTIFICATIONS_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+function setProactiveNotificationQueue(items) {
+  const list = Array.isArray(items) ? items : [];
+  localStorage.setItem(PROACTIVE_NOTIFICATIONS_KEY, JSON.stringify(list));
+}
+
+function getNotificationHash(payload) {
+  return [payload.tipo, payload.severidade, payload.titulo, payload.ctaTab].join('|').toLowerCase();
+}
+
+function buildProactiveNotificationPayloads(alertas) {
+  const list = Array.isArray(alertas) ? alertas : [];
+  const nowIso = new Date().toISOString();
+
+  return list.map((alerta) => {
+    const severidade = alerta.nivel === 'critical' ? 'alta' : (alerta.nivel === 'warning' ? 'media' : 'baixa');
+    const tipo = String(alerta.ctaTab || 'dashboard_alert').toLowerCase();
+
+    return {
+      id: nowIso + '-' + Math.random().toString(36).slice(2, 8),
+      createdAt: nowIso,
+      tipo,
+      severidade,
+      titulo: String(alerta.titulo || ''),
+      descricao: String(alerta.descricao || ''),
+      acaoRecomendada: String(alerta.acao || ''),
+      ctaLabel: String(alerta.ctaLabel || ''),
+      ctaTab: String(alerta.ctaTab || ''),
+      origem: 'dashboard_estoque',
+      statusEnvio: 'pendente'
+    };
+  });
+}
+
+function updateProactiveNotificationStatus(triggersCount, queuedCount, newCount, extraInfo = '') {
+  const el = document.getElementById('proactiveNotificationStatus');
+  if (!el) return;
+
+  const baseText =
+    'Notificações proativas: ' + triggersCount + ' gatilho(s) ativos · ' + queuedCount + ' pendente(s) na fila interna · ' + newCount + ' novo(s) nesta atualização.';
+  el.textContent = extraInfo ? (baseText + ' ' + extraInfo) : baseText;
+}
+
+function tryDispatchProactiveNotifications() {
+  const now = Date.now();
+  const lastDispatch = Number(localStorage.getItem(PROACTIVE_DISPATCH_COOLDOWN_KEY) || '0');
+  if ((now - lastDispatch) < PROACTIVE_DISPATCH_COOLDOWN_MS) {
+    return;
+  }
+
+  const queue = getProactiveNotificationQueue();
+  const pendentes = queue.filter((item) => String(item.statusEnvio || '').toLowerCase() === 'pendente');
+  if (!pendentes.length) {
+    return;
+  }
+
+  const batch = pendentes.slice(0, PROACTIVE_DISPATCH_BATCH_SIZE);
+  localStorage.setItem(PROACTIVE_DISPATCH_COOLDOWN_KEY, String(now));
+
+  google.script.run
+    .withSuccessHandler((resp) => {
+      if (!resp || resp.status !== 'SUCESSO') {
+        const mensagem = resp?.message || 'Falha no envio interno';
+        updateProactiveNotificationStatus(batch.length, pendentes.length, 0, 'Envio interno pendente: ' + mensagem + '.');
+        return;
+      }
+
+      const sentIds = Array.isArray(resp.sentIds) ? resp.sentIds : [];
+      const current = getProactiveNotificationQueue();
+      const updated = current.map((item) => {
+        if (sentIds.includes(item.id)) {
+          return {
+            ...item,
+            statusEnvio: 'enviado',
+            sentAt: resp.sentAt || new Date().toISOString()
+          };
+        }
+        return item;
+      });
+
+      setProactiveNotificationQueue(updated);
+      const pendingAfter = updated.filter((item) => String(item.statusEnvio || '').toLowerCase() === 'pendente').length;
+      updateProactiveNotificationStatus(batch.length, pendingAfter, 0, 'Envio interno: ' + sentIds.length + ' notificação(ões) confirmada(s).');
+    })
+    .withFailureHandler((err) => {
+      updateProactiveNotificationStatus(batch.length, pendentes.length, 0, 'Erro no endpoint interno: ' + err + '.');
+    })
+    .sendProactiveNotifications_Web({
+      notifications: batch,
+      origin: 'dashboard_estoque'
+    });
+}
+
+function registerProactiveNotificationsFromAlerts(alertas) {
+  const queue = getProactiveNotificationQueue();
+  const payloads = buildProactiveNotificationPayloads(alertas);
+  const nowTs = Date.now();
+  const maxAgeMs = 72 * 60 * 60 * 1000;
+
+  const filteredQueue = queue.filter((item) => {
+    const ts = item.createdAt ? new Date(item.createdAt).getTime() : 0;
+    return !isNaN(ts) && (nowTs - ts) <= maxAgeMs;
+  });
+  const existingHashes = new Set(filteredQueue.map(item => item.hash));
+
+  let newCount = 0;
+  payloads.forEach((payload) => {
+    const hash = getNotificationHash(payload);
+    if (existingHashes.has(hash)) {
+      return;
+    }
+
+    existingHashes.add(hash);
+    filteredQueue.push({ ...payload, hash });
+    newCount++;
+  });
+
+  const finalQueue = filteredQueue.slice(-50);
+  setProactiveNotificationQueue(finalQueue);
+  const pendentes = finalQueue.filter((item) => String(item.statusEnvio || '').toLowerCase() === 'pendente').length;
+  updateProactiveNotificationStatus(payloads.length, pendentes, newCount);
+  tryDispatchProactiveNotifications();
 }
 
 // ==================== FILTROS ====================
@@ -1892,6 +2362,12 @@ function aplicarFiltros() {
   console.log('[ESTOQUE] ✅ Filtro aplicado:', rolosFiltrados.length, 'resultados');
   renderEstoque(rolosFiltrados);
   updateStats(rolosFiltrados);
+
+  saveFilterSection('estoquePeriodo', {
+    dataInicio,
+    dataFim,
+    fornecedor: document.getElementById('filtroFornecedor').value
+  });
 }
 
 function limparFiltros() {
@@ -1964,6 +2440,13 @@ function buscarEstoque() {
   
   renderEstoque(rolosFiltrados);
   updateStats(rolosFiltrados);
+
+  saveFilterSection('estoqueBusca', {
+    busca: document.getElementById('buscaRapida').value,
+    tipo: document.getElementById('filtroTipoEstoque').value,
+    fornecedor: document.getElementById('filtroFornecedor').value,
+    localizacao: document.getElementById('filtroLocalizacao').value
+  });
 }
 
 function limparBuscaEstoque() {
@@ -1976,6 +2459,13 @@ function limparBuscaEstoque() {
   renderEstoque(allRolos);
   updateStats(allRolos);
   showToast('Filtros de estoque limpos.', 'info');
+
+  saveFilterSection('estoqueBusca', {
+    busca: '',
+    tipo: '',
+    fornecedor: '',
+    localizacao: ''
+  });
 }
 
 function atualizarSelectFornecedores() {
@@ -2065,6 +2555,7 @@ function loadEstoque() {
       allRolos = Array.isArray(rolosEst) ? rolosEst : [];
       allAguardando = Array.isArray(rolosAguard) ? rolosAguard : [];
       allCompras = Array.isArray(casos) ? casos : [];
+      comprasTotalReferencia = allCompras.length;
       corteSolicitacoes = Array.isArray(cortes) ? cortes : [];
       
       console.log('[ESTOQUE] ✅ Dados paralelizados:', {
@@ -2079,6 +2570,7 @@ function loadEstoque() {
       
       // Render all sections
       renderEstoque(allRolos);
+      renderReposicaoRisco(allRolos);
       renderWorkflowAguardando(allAguardando);
       renderAnaliseSupervisor(allAguardando);
       renderCompras(allCompras);
@@ -2086,7 +2578,12 @@ function loadEstoque() {
       
       populateCorteTecidoSelect();
       updateStats(allRolos);
+      renderComprasByCurrentFilters({
+        contextLabel: 'dados consolidados'
+      });
+      scheduleComprasRefresh(allCompras);
       atualizarSelectFornecedores();
+      applySavedFiltersAfterDataLoad();
       
       console.log('[ESTOQUE] 🏃 Carregamento paralelo concluído');
     }).catch((err) => {
@@ -2337,9 +2834,48 @@ function fetchRollsByStatus(status) {
   });
 }
 
-// DEPRECATED: loadCompras() — now consolidated in loadEstoque()
-function loadCompras() {
-  console.log('[ESTOQUE] ⚠️ loadCompras() deprecated — use loadEstoque() with parallelized calls');
+function loadCompras(options = {}) {
+  const silent = !!options.silent;
+  const contextLabel = options.contextLabel || 'atualização automática';
+  const source = options.source || 'manual';
+
+  if (!isComprasTabActive()) {
+    if (comprasAutoRefreshTimer) {
+      clearTimeout(comprasAutoRefreshTimer);
+      comprasAutoRefreshTimer = null;
+    }
+    return;
+  }
+
+  if (!silent) {
+    showToast('⏳ Atualizando dados de Compras...', 'info');
+  }
+
+  google.script.run
+    .withSuccessHandler((casos) => {
+      allCompras = Array.isArray(casos) ? casos : [];
+      comprasTotalReferencia = allCompras.length;
+
+      consolidarTodosRolos();
+      updateStats(allRolos);
+      renderComprasByCurrentFilters({ contextLabel });
+      scheduleComprasRefresh(allCompras);
+      if (source === 'auto-refresh') {
+        updateComprasAutoRefreshLastRun();
+      }
+
+      if (!silent) {
+        showToast('✅ Compras atualizadas.', 'success');
+      }
+    })
+    .withFailureHandler((err) => {
+      console.error('[ESTOQUE] ❌ Erro ao atualizar Compras:', err);
+      if (!silent) {
+        showToast('❌ Erro ao atualizar Compras: ' + err, 'error');
+      }
+      scheduleComprasRefresh(allCompras);
+    })
+    .getComprasCases_Web();
 }
 
 function scheduleComprasRefresh(casos) {
@@ -2356,6 +2892,12 @@ function scheduleComprasRefresh(casos) {
     comprasAutoRefreshTimer = null;
   }
 
+  const intervalMs = Number(comprasAutoRefreshIntervalMs || 0);
+  if (intervalMs <= 0) {
+    updateComprasAutoRefreshIndicator(false);
+    return;
+  }
+
   const list = Array.isArray(casos) ? casos : [];
   const needsPdf = list.some((r) => {
     const pdfUrl = String(r.compras_pdf_url || r.pdf_reprovacao_url || r.relatorio_url || '').trim();
@@ -2363,10 +2905,16 @@ function scheduleComprasRefresh(casos) {
     return !pdfUrl && status !== 'pronto';
   });
 
+  updateComprasAutoRefreshIndicator(needsPdf);
+
   if (needsPdf) {
     comprasAutoRefreshTimer = setTimeout(() => {
-      loadCompras();
-    }, 45000);
+      loadCompras({
+        silent: true,
+        contextLabel: 'atualização automática',
+        source: 'auto-refresh'
+      });
+    }, intervalMs);
   }
 }
 
@@ -3387,6 +3935,11 @@ function aplicarFiltrosAnalise() {
   }
   
   renderAnaliseSupervisor(rolosFiltrados);
+
+  saveFilterSection('analise', {
+    tipoTecido,
+    prioridade
+  });
 }
 
 function limparFiltrosAnalise() {
@@ -3394,6 +3947,11 @@ function limparFiltrosAnalise() {
   document.getElementById('filtroPrioridade').value = '';
   
   renderAnaliseSupervisor(allAguardando);
+
+  saveFilterSection('analise', {
+    tipoTecido: '',
+    prioridade: ''
+  });
 }
 
 // ==================== RENDER ====================
@@ -3521,6 +4079,394 @@ function renderEstoque(rolos, pagina = 1) {
   }
 }
 
+function getReposicaoDisponivelInfo(item) {
+  const tipo = String(item.tipoTecido || item.TIPO_TECIDO || item.tipo_tecido || 'PLANO').toUpperCase();
+  const isMalha = tipo === 'MALHA';
+
+  const disponivel = isMalha
+    ? (Number(item.pesoKg || item.PESO_KG || item.peso_kg || 0) || 0)
+    : (Number(item.metros || item.METROS_REVISADO || item.metros_revisado || item.METROS_FORNECEDOR || 0) || 0);
+
+  const unidade = isMalha ? 'kg' : 'm';
+  const minimo = isMalha ? 40 : 80;
+  const alvo = isMalha ? 90 : 140;
+
+  return { tipo, disponivel, unidade, minimo, alvo };
+}
+
+function normalizeReposicaoKey(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function buildReposicaoConsumoMap() {
+  const map = new Map();
+  const itens = Array.isArray(corteSolicitacoes) ? corteSolicitacoes : [];
+  const cutoff = Date.now() - (45 * 24 * 60 * 60 * 1000);
+
+  itens.forEach((item) => {
+    const quantidade = Number(item.quantidade_solicitada || 0) || 0;
+    if (quantidade <= 0) return;
+
+    const dtRaw = item.data_corte || item.timestamp || null;
+    const ts = dtRaw ? new Date(dtRaw).getTime() : NaN;
+    if (isNaN(ts) || ts < cutoff) return;
+
+    const dayKey = new Date(ts).toISOString().slice(0, 10);
+    const lookupCandidates = [item.produto_id, item.id, item.rolo_id]
+      .map(normalizeReposicaoKey)
+      .filter(Boolean);
+
+    lookupCandidates.forEach((lookupKey) => {
+      if (!map.has(lookupKey)) {
+        map.set(lookupKey, {
+          total: 0,
+          dias: new Set()
+        });
+      }
+
+      const registro = map.get(lookupKey);
+      registro.total += quantidade;
+      registro.dias.add(dayKey);
+    });
+  });
+
+  return map;
+}
+
+function getReposicaoCoberturaInfo(disponivel, consumoMedioDiario) {
+  if (!consumoMedioDiario || consumoMedioDiario <= 0) {
+    return {
+      diasCobertura: null,
+      faixaRisco: 'Sem consumo recente',
+      coberturaLabel: 'Sem consumo recente'
+    };
+  }
+
+  const diasCobertura = disponivel <= 0 ? 0 : (disponivel / consumoMedioDiario);
+
+  let faixaRisco = 'Baixo (>30 dias)';
+  if (diasCobertura <= 3) faixaRisco = 'Ruptura imediata (<=3 dias)';
+  else if (diasCobertura <= 7) faixaRisco = 'Crítico (<=7 dias)';
+  else if (diasCobertura <= 15) faixaRisco = 'Alto (<=15 dias)';
+  else if (diasCobertura <= 30) faixaRisco = 'Moderado (<=30 dias)';
+
+  return {
+    diasCobertura,
+    faixaRisco,
+    coberturaLabel: diasCobertura.toFixed(1) + ' dias'
+  };
+}
+
+function calculateReposicaoCriticos(rolos) {
+  const list = Array.isArray(rolos) ? rolos : [];
+  const agrupado = new Map();
+  const consumoMap = buildReposicaoConsumoMap();
+
+  list.forEach((r) => {
+    const fornecedor = getFornecedorDisplay(r);
+    const produto = getProdutoIdDisplay(r);
+    const cor = getCorDisplay(r);
+    const tipo = String(r.TIPO_TECIDO || r.tipo_tecido || 'PLANO').toUpperCase();
+    const key = [fornecedor, produto, cor, tipo].join('|');
+
+    if (!agrupado.has(key)) {
+      agrupado.set(key, {
+        fornecedor,
+        produto,
+        cor,
+        tipoTecido: tipo,
+        metros: 0,
+        pesoKg: 0,
+        rolos: 0,
+        ressalvas: false,
+        defeitos: 0
+      });
+    }
+
+    const item = agrupado.get(key);
+    item.rolos += 1;
+    item.metros += Number(r.METROS_REVISADO || r.metros_revisado || r.METROS_FORNECEDOR || 0) || 0;
+    item.pesoKg += Number(r.PESO_KG || r.peso_kg || 0) || 0;
+    item.defeitos += Number(r.DEFEITOS_TOTAIS || r.defeitos_totais || 0) || 0;
+
+    const temRessalvas = r.DISPONIVEL_COM_RESSALVAS === true ||
+      String(r.DISPONIVEL_COM_RESSALVAS || r.disponivel_com_ressalvas || '').toLowerCase() === 'true';
+    if (temRessalvas) item.ressalvas = true;
+  });
+
+  const itensCriticos = [];
+
+  Array.from(agrupado.values()).forEach((item) => {
+    const info = getReposicaoDisponivelInfo(item);
+    const lookupKey = normalizeReposicaoKey(item.produto);
+    const consumoRaw = consumoMap.get(lookupKey);
+    const consumoMedioDiario = consumoRaw
+      ? (consumoRaw.total / Math.max(1, consumoRaw.dias.size))
+      : 0;
+    const coberturaInfo = getReposicaoCoberturaInfo(info.disponivel, consumoMedioDiario);
+
+    const disponibilidadeBaixa = info.disponivel < info.minimo;
+    const disponibilidadeCritica = info.disponivel < (info.minimo * 0.5);
+    const riscoRessalvas = item.ressalvas && info.disponivel < (info.minimo * 1.2);
+    const riscoCobertura = coberturaInfo.diasCobertura != null && coberturaInfo.diasCobertura <= 15;
+
+    if (!disponibilidadeBaixa && !riscoRessalvas && !riscoCobertura) {
+      return;
+    }
+
+    const nivel = (
+      disponibilidadeCritica ||
+      (coberturaInfo.diasCobertura != null && coberturaInfo.diasCobertura <= 7) ||
+      (item.ressalvas && info.disponivel < info.minimo)
+    ) ? 'CRÍTICO' : 'ALTO';
+
+    const alvoCobertura = consumoMedioDiario > 0 ? (consumoMedioDiario * 21) : info.alvo;
+    const sugestaoCompra = Math.max(0, alvoCobertura - info.disponivel);
+
+    let prioridade = 50;
+    if (coberturaInfo.diasCobertura != null) {
+      prioridade += Math.max(0, 120 - (coberturaInfo.diasCobertura * 6));
+    } else if (disponibilidadeBaixa) {
+      prioridade += 40;
+    }
+    if (nivel === 'CRÍTICO') prioridade += 50;
+    if (item.ressalvas) prioridade += 20;
+    if (item.defeitos > 0) prioridade += Math.min(20, item.defeitos);
+
+    const justificativa = coberturaInfo.diasCobertura != null
+      ? ('Cobertura estimada em ' + coberturaInfo.coberturaLabel + ' (' + coberturaInfo.faixaRisco + ').')
+      : (item.ressalvas
+        ? 'Sem histórico recente de consumo, porém item com ressalvas e cobertura baixa.'
+        : 'Sem histórico recente de consumo; reposição baseada em mínimo operacional.');
+
+    itensCriticos.push({
+      fornecedor: item.fornecedor,
+      produto: item.produto,
+      cor: item.cor,
+      tipoTecido: info.tipo,
+      disponivel: info.disponivel,
+      unidade: info.unidade,
+      nivel,
+      sugestaoCompra,
+      consumoMedioDiario,
+      diasCobertura: coberturaInfo.diasCobertura,
+      coberturaLabel: coberturaInfo.coberturaLabel,
+      faixaRisco: coberturaInfo.faixaRisco,
+      rolos: item.rolos,
+      defeitos: item.defeitos,
+      justificativa,
+      prioridade
+    });
+  });
+
+  itensCriticos.sort((a, b) => {
+    if (b.prioridade !== a.prioridade) return b.prioridade - a.prioridade;
+    return b.sugestaoCompra - a.sugestaoCompra;
+  });
+
+  return itensCriticos;
+}
+
+function applyReposicaoResumo(itens) {
+  const list = Array.isArray(itens) ? itens : [];
+  const criticos = list.filter(i => i.nivel === 'CRÍTICO').length;
+  const alerta = list.filter(i => i.nivel === 'ALTO').length;
+  const sugestoes = list.filter(i => i.sugestaoCompra > 0).length;
+
+  const totalSugeridoM = list
+    .filter(i => i.unidade === 'm')
+    .reduce((sum, i) => sum + i.sugestaoCompra, 0);
+  const totalSugeridoKg = list
+    .filter(i => i.unidade === 'kg')
+    .reduce((sum, i) => sum + i.sugestaoCompra, 0);
+
+  const elemCriticos = document.getElementById('reposicaoTotalCriticos');
+  const elemAlerta = document.getElementById('reposicaoTotalAlerta');
+  const elemSugestoes = document.getElementById('reposicaoSugestoesAtivas');
+  const elemVolume = document.getElementById('reposicaoVolumeSugerido');
+
+  if (elemCriticos) elemCriticos.textContent = criticos;
+  if (elemAlerta) elemAlerta.textContent = alerta;
+  if (elemSugestoes) elemSugestoes.textContent = sugestoes;
+  if (elemVolume) elemVolume.textContent = totalSugeridoM.toFixed(1) + 'm / ' + totalSugeridoKg.toFixed(1) + 'kg';
+}
+
+function calculateReposicaoRankingFornecedor(itens) {
+  const list = Array.isArray(itens) ? itens : [];
+  const agrupado = new Map();
+
+  list.forEach((item) => {
+    const fornecedor = String(item.fornecedor || 'Fornecedor N/A').trim() || 'Fornecedor N/A';
+    if (!agrupado.has(fornecedor)) {
+      agrupado.set(fornecedor, {
+        fornecedor,
+        itens: 0,
+        criticos: 0,
+        alto: 0,
+        prioridadeTotal: 0,
+        volumeM: 0,
+        volumeKg: 0,
+        coberturaMin: null
+      });
+    }
+
+    const registro = agrupado.get(fornecedor);
+    registro.itens += 1;
+    if (item.nivel === 'CRÍTICO') registro.criticos += 1;
+    if (item.nivel === 'ALTO') registro.alto += 1;
+    registro.prioridadeTotal += Number(item.prioridade || 0);
+
+    if (item.unidade === 'kg') registro.volumeKg += Number(item.sugestaoCompra || 0);
+    else registro.volumeM += Number(item.sugestaoCompra || 0);
+
+    if (item.diasCobertura != null) {
+      registro.coberturaMin = registro.coberturaMin == null
+        ? item.diasCobertura
+        : Math.min(registro.coberturaMin, item.diasCobertura);
+    }
+  });
+
+  const ranking = Array.from(agrupado.values()).map((row) => {
+    const score = (row.criticos * 120) + (row.alto * 60) + row.prioridadeTotal;
+    return {
+      ...row,
+      score
+    };
+  });
+
+  ranking.sort((a, b) => b.score - a.score);
+  return ranking;
+}
+
+function renderReposicaoRankingFornecedor(itens) {
+  const container = document.getElementById('reposicaoRankingFornecedor');
+  if (!container) return;
+
+  const ranking = calculateReposicaoRankingFornecedor(itens);
+  if (ranking.length === 0) {
+    container.innerHTML = '<div class="empty">Sem dados de fornecedor para o filtro atual.</div>';
+    return;
+  }
+
+  const rows = ranking.slice(0, 12).map((row, idx) => {
+    const cobertura = row.coberturaMin == null ? '-' : row.coberturaMin.toFixed(1) + ' dias';
+    return '<tr>' +
+      '<td style="padding: 10px; border-bottom: 1px solid var(--border); text-align: center; font-weight: 700;">' + (idx + 1) + '</td>' +
+      '<td style="padding: 10px; border-bottom: 1px solid var(--border);">' + escapeHtml(row.fornecedor) + '</td>' +
+      '<td style="padding: 10px; border-bottom: 1px solid var(--border); text-align: center;">' + row.criticos + '</td>' +
+      '<td style="padding: 10px; border-bottom: 1px solid var(--border); text-align: center;">' + row.alto + '</td>' +
+      '<td style="padding: 10px; border-bottom: 1px solid var(--border); text-align: right;">' + row.volumeM.toFixed(1) + 'm / ' + row.volumeKg.toFixed(1) + 'kg</td>' +
+      '<td style="padding: 10px; border-bottom: 1px solid var(--border); text-align: center;">' + cobertura + '</td>' +
+      '<td style="padding: 10px; border-bottom: 1px solid var(--border); text-align: right; font-weight: 700;">' + row.score.toFixed(0) + '</td>' +
+    '</tr>';
+  }).join('');
+
+  container.innerHTML = '<div class="table-container">' +
+    '<table class="data-table">' +
+      '<thead><tr>' +
+        '<th style="text-align:center;">#</th>' +
+        '<th>Fornecedor</th>' +
+        '<th style="text-align:center;">Críticos</th>' +
+        '<th style="text-align:center;">Altos</th>' +
+        '<th style="text-align:right;">Volume Sugerido</th>' +
+        '<th style="text-align:center;">Pior Cobertura</th>' +
+        '<th style="text-align:right;">Score de Risco</th>' +
+      '</tr></thead>' +
+      '<tbody>' + rows + '</tbody>' +
+    '</table>' +
+  '</div>';
+}
+
+function renderReposicaoList(itens) {
+  const container = document.getElementById('reposicaoLista');
+  if (!container) return;
+
+  const list = Array.isArray(itens) ? itens : [];
+  if (list.length === 0) {
+    container.innerHTML = '<div class="empty">Nenhum item crítico para reposição no filtro atual.</div>';
+    return;
+  }
+
+  const rows = list.map((item) => {
+    const nivelColor = item.nivel === 'CRÍTICO' ? 'var(--danger)' : 'var(--warning)';
+    return '<tr>' +
+      '<td style="padding: 10px; border-bottom: 1px solid var(--border);">' + escapeHtml(item.fornecedor) + '</td>' +
+      '<td style="padding: 10px; border-bottom: 1px solid var(--border);">' + escapeHtml(item.produto) + '</td>' +
+      '<td style="padding: 10px; border-bottom: 1px solid var(--border);">' + escapeHtml(item.cor) + '</td>' +
+      '<td style="padding: 10px; border-bottom: 1px solid var(--border); text-align: center;">' + escapeHtml(item.tipoTecido) + '</td>' +
+      '<td style="padding: 10px; border-bottom: 1px solid var(--border); text-align: right;">' + item.disponivel.toFixed(1) + ' ' + item.unidade + '</td>' +
+      '<td style="padding: 10px; border-bottom: 1px solid var(--border); text-align: center;">' + escapeHtml(item.coberturaLabel) + '</td>' +
+      '<td style="padding: 10px; border-bottom: 1px solid var(--border); text-align: center;">' + escapeHtml(item.faixaRisco) + '</td>' +
+      '<td style="padding: 10px; border-bottom: 1px solid var(--border); text-align: center;"><span style="font-weight:700; color:' + nivelColor + ';">' + item.nivel + '</span></td>' +
+      '<td style="padding: 10px; border-bottom: 1px solid var(--border); text-align: right;">' + item.sugestaoCompra.toFixed(1) + ' ' + item.unidade + '</td>' +
+      '<td style="padding: 10px; border-bottom: 1px solid var(--border);">' + escapeHtml(item.justificativa) + '</td>' +
+    '</tr>';
+  }).join('');
+
+  container.innerHTML = '<div class="table-container">' +
+    '<table class="data-table">' +
+      '<thead><tr>' +
+        '<th>Fornecedor</th>' +
+        '<th>Produto</th>' +
+        '<th>Cor</th>' +
+        '<th>Tipo</th>' +
+        '<th style="text-align:right;">Disponível</th>' +
+        '<th style="text-align:center;">Cobertura</th>' +
+        '<th style="text-align:center;">Faixa de Risco</th>' +
+        '<th style="text-align:center;">Nível</th>' +
+        '<th style="text-align:right;">Sugestão Compra</th>' +
+        '<th>Justificativa</th>' +
+      '</tr></thead>' +
+      '<tbody>' + rows + '</tbody>' +
+    '</table>' +
+  '</div>';
+}
+
+function applyReposicaoFiltersToList(baseList) {
+  const tipo = String(document.getElementById('reposicaoFiltroTipo')?.value || '').toUpperCase();
+  const fornecedor = String(document.getElementById('reposicaoFiltroFornecedor')?.value || '').toLowerCase().trim();
+
+  let filtrados = Array.isArray(baseList) ? [...baseList] : [];
+
+  if (tipo) {
+    filtrados = filtrados.filter(item => String(item.tipoTecido || '').toUpperCase() === tipo);
+  }
+
+  if (fornecedor) {
+    filtrados = filtrados.filter(item => String(item.fornecedor || '').toLowerCase().includes(fornecedor));
+  }
+
+  return filtrados;
+}
+
+function renderReposicaoRisco(rolos) {
+  reposicaoDadosCriticos = calculateReposicaoCriticos(rolos);
+  const filtrados = applyReposicaoFiltersToList(reposicaoDadosCriticos);
+  applyReposicaoResumo(filtrados);
+  renderReposicaoList(filtrados);
+  renderReposicaoRankingFornecedor(filtrados);
+}
+
+function aplicarFiltrosReposicao() {
+  const filtrados = applyReposicaoFiltersToList(reposicaoDadosCriticos);
+  applyReposicaoResumo(filtrados);
+  renderReposicaoList(filtrados);
+  renderReposicaoRankingFornecedor(filtrados);
+
+  saveFilterSection('reposicao', {
+    tipo: String(document.getElementById('reposicaoFiltroTipo')?.value || ''),
+    fornecedor: String(document.getElementById('reposicaoFiltroFornecedor')?.value || '')
+  });
+}
+
+function limparFiltrosReposicao() {
+  const filtroTipo = document.getElementById('reposicaoFiltroTipo');
+  const filtroFornecedor = document.getElementById('reposicaoFiltroFornecedor');
+  if (filtroTipo) filtroTipo.value = '';
+  if (filtroFornecedor) filtroFornecedor.value = '';
+  aplicarFiltrosReposicao();
+}
+
 function mudarPaginaEstoque(direcao) {
   const novaPagina = estoqueAtualPagina + direcao;
   const totalPaginas = Math.ceil(estoqueRolosFiltrados.length / estoqueItensPorPagina);
@@ -3582,6 +4528,201 @@ function renderWorkflowAguardando(rolos) {
   container.innerHTML = html;
 }
 
+function getFirstValidTimestampFromFields(item, fields) {
+  for (const fieldName of fields) {
+    const rawValue = item[fieldName];
+    if (!rawValue) continue;
+    const parsedDate = new Date(rawValue);
+    const parsedTs = parsedDate.getTime();
+    if (!isNaN(parsedTs)) return parsedTs;
+  }
+  return null;
+}
+
+function getComprasStatusInfo(item) {
+  const faseAtual = String(item.FASE_ATUAL || item.fase_atual || item.STATUS_FINAL || item.status_final || '').toLowerCase();
+  const statusCase = String(item.compras_status_case || item.COMPRAS_STATUS_CASE || item.STATUS_COMPRAS || item.status_compras || '').toLowerCase();
+
+  const emNegociacao = statusCase === 'em_negociacao' || statusCase.includes('negociacao') || statusCase.includes('negociando');
+  const resolvido = faseAtual === 'finalizado_reprovado' ||
+    faseAtual === 'aprovado_compras' ||
+    faseAtual === 'reprovado_compras' ||
+    faseAtual.includes('finalizado') ||
+    statusCase === 'resolvido' ||
+    (faseAtual === 'em_estoque' && !emNegociacao);
+
+  let statusLabel = 'PENDENTE';
+  if (emNegociacao && !resolvido) statusLabel = 'EM NEGOCIAÇÃO';
+  if (resolvido) statusLabel = 'RESOLVIDO';
+
+  const statusColor = statusLabel === 'RESOLVIDO'
+    ? '#00b368'
+    : (statusLabel === 'EM NEGOCIAÇÃO' ? '#ff9500' : '#ff6b6b');
+
+  return {
+    faseAtual,
+    statusCase,
+    emNegociacao,
+    resolvido,
+    statusLabel,
+    statusColor
+  };
+}
+
+function calculateComprasKpis(casos) {
+  const list = Array.isArray(casos) ? casos : [];
+
+  let pendentes = 0;
+  let negociacao = 0;
+  let resolvidos = 0;
+  const temposResolucaoDias = [];
+
+  list.forEach((item) => {
+    const statusInfo = getComprasStatusInfo(item);
+
+    if (statusInfo.resolvido) {
+      resolvidos++;
+
+      const inicioTs = getFirstValidTimestampFromFields(item, [
+        'DATA_REPROVACAO',
+        'data_reprovacao',
+        'DATA_REGISTRO',
+        'data_registro',
+        'created_at',
+        'timestamp'
+      ]);
+
+      const fimTs = getFirstValidTimestampFromFields(item, [
+        'DATA_RESOLUCAO',
+        'data_resolucao',
+        'DATA_ATUALIZACAO',
+        'data_atualizacao',
+        'updated_at',
+        'timestamp'
+      ]);
+
+      if (inicioTs != null && fimTs != null && fimTs >= inicioTs) {
+        temposResolucaoDias.push((fimTs - inicioTs) / (1000 * 60 * 60 * 24));
+      }
+      return;
+    }
+
+    if (statusInfo.emNegociacao) {
+      negociacao++;
+    } else {
+      pendentes++;
+    }
+  });
+
+  const tempoMedioDias = temposResolucaoDias.length > 0
+    ? (temposResolucaoDias.reduce((acc, value) => acc + value, 0) / temposResolucaoDias.length)
+    : null;
+
+  return {
+    pendentes,
+    negociacao,
+    resolvidos,
+    tempoMedioDias
+  };
+}
+
+function updateComprasCards(casos, contextLabel = 'atualização automática') {
+  const kpis = calculateComprasKpis(casos);
+
+  const elem1 = document.getElementById('comprasPendentes');
+  const elem2 = document.getElementById('comprasNegociacao');
+  const elem3 = document.getElementById('comprasResolvidos');
+  const elem4 = document.getElementById('tempoMedioCompras');
+
+  if (elem1) elem1.textContent = kpis.pendentes;
+  if (elem2) elem2.textContent = kpis.negociacao;
+  if (elem3) elem3.textContent = kpis.resolvidos;
+  if (elem4) elem4.textContent = kpis.tempoMedioDias != null ? (kpis.tempoMedioDias.toFixed(1) + 'd') : '-';
+
+  updateComprasLastUpdated(contextLabel);
+
+  return kpis;
+}
+
+function updateComprasLastUpdated(contextLabel) {
+  const stampEl = document.getElementById('comprasUpdateStamp');
+  const stampTextEl = document.getElementById('comprasUpdateText');
+  const target = stampTextEl || stampEl;
+  if (!target) return;
+
+  const now = new Date();
+  const formatted = now.toLocaleString('pt-BR', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit'
+  });
+
+  target.textContent = 'Última atualização: ' + formatted + ' (' + contextLabel + ')';
+}
+
+function updateComprasAutoRefreshIndicator(hasPendingPdf) {
+  const statusEl = document.getElementById('comprasRefreshStatus');
+  if (!statusEl) return;
+
+  const intervalMs = Number(comprasAutoRefreshIntervalMs || 0);
+  if (intervalMs <= 0) {
+    statusEl.textContent = 'Auto-refresh: desativado';
+    statusEl.style.borderColor = 'var(--warning)';
+    statusEl.style.color = 'var(--warning)';
+    statusEl.style.background = 'var(--bg-secondary)';
+    return;
+  }
+
+  const intervalSeconds = Math.round(intervalMs / 1000);
+  if (hasPendingPdf === true) {
+    statusEl.textContent = 'Auto-refresh: ativo (' + intervalSeconds + 's)';
+    statusEl.style.borderColor = 'var(--success)';
+    statusEl.style.color = 'var(--success)';
+    statusEl.style.background = 'var(--bg-secondary)';
+    return;
+  }
+
+  statusEl.textContent = 'Auto-refresh: em espera (' + intervalSeconds + 's)';
+  statusEl.style.borderColor = 'var(--border)';
+  statusEl.style.color = 'var(--text-secondary)';
+  statusEl.style.background = 'var(--bg-secondary)';
+}
+
+function updateComprasAutoRefreshLastRun() {
+  const runEl = document.getElementById('comprasAutoRefreshLastRun');
+  if (!runEl) return;
+
+  const now = new Date();
+  const formatted = now.toLocaleString('pt-BR', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit'
+  });
+
+  runEl.textContent = 'Último auto-refresh: ' + formatted;
+}
+
+function updateComprasFilterIndicator(filteredCount, totalCount, isFiltered) {
+  const infoEl = document.getElementById('comprasFiltroInfo');
+  if (!infoEl) return;
+
+  if (isFiltered) {
+    infoEl.textContent = 'Filtro ativo: exibindo ' + filteredCount + ' de ' + totalCount + ' casos de compras.';
+    infoEl.style.borderColor = 'var(--warning)';
+    infoEl.style.color = 'var(--text-primary)';
+  } else {
+    infoEl.textContent = 'Exibindo visão total de compras (' + totalCount + ' casos).';
+    infoEl.style.borderColor = 'var(--border)';
+    infoEl.style.color = 'var(--text-secondary)';
+  }
+}
+
 function renderCompras(rolos) {
   const container = document.getElementById('comprasList');
   
@@ -3620,15 +4761,11 @@ function renderCompras(rolos) {
     const rowBg = idx % 2 === 0 ? 'transparent' : 'rgba(255, 255, 255, 0.02)';
     const safeId = String((r.REVISION_ID || r.revision_id || r.id_do_rolo || '')).replace(/[^a-zA-Z0-9_-]/g, '_');
 
-    const faseAtual = String(r.FASE_ATUAL || r.fase_atual || '').toLowerCase();
-    const statusCase = String(r.compras_status_case || r.COMPRAS_STATUS_CASE || '').toLowerCase();
-    const resolvido = faseAtual === 'finalizado_reprovado' || (faseAtual === 'em_estoque' && statusCase !== 'em_negociacao') || faseAtual === 'aprovado_compras' || faseAtual === 'reprovado_compras' || statusCase === 'resolvido';
-
-    let statusLabel = 'PENDENTE';
-    if (statusCase === 'em_negociacao') statusLabel = 'EM NEGOCIAÇÃO';
-    if (resolvido) statusLabel = 'RESOLVIDO';
-
-    const statusColor = statusLabel === 'RESOLVIDO' ? '#00b368' : (statusLabel === 'EM NEGOCIAÇÃO' ? '#ff9500' : '#ff6b6b');
+    const statusInfo = getComprasStatusInfo(r);
+    const statusCase = statusInfo.statusCase;
+    const resolvido = statusInfo.resolvido;
+    const statusLabel = statusInfo.statusLabel;
+    const statusColor = statusInfo.statusColor;
 
     const decisaoAtual = String((r.compras_tipo_decisao || '').toLowerCase());
     const respostaAtual = String(r.compras_resposta || '').trim();
@@ -3691,52 +4828,118 @@ function downloadPdfCompras(encodedUrl, roloId) {
   }
 }
 
-function filtrarCompras() {
-  const status = document.getElementById('filtroStatusCompras').value.toUpperCase();
-  const fornecedor = document.getElementById('filtroFornecedorCompras').value.toLowerCase().trim();
-  const dataInicio = document.getElementById('dataInicioCompras').value;
+function getComprasFiltersState() {
+  const status = String(document.getElementById('filtroStatusCompras')?.value || '').toUpperCase();
+  const fornecedor = String(document.getElementById('filtroFornecedorCompras')?.value || '').toLowerCase().trim();
+  const dataInicio = String(document.getElementById('dataInicioCompras')?.value || '').trim();
+  const filtroAtivo = !!(status || fornecedor || dataInicio);
 
-  let filtrados = [...allCompras];
+  return {
+    status,
+    fornecedor,
+    dataInicio,
+    filtroAtivo
+  };
+}
 
-  if (fornecedor) {
+function filterComprasCases(casos, filters) {
+  const source = Array.isArray(casos) ? casos : [];
+  const state = filters || getComprasFiltersState();
+  let filtrados = [...source];
+
+  if (state.fornecedor) {
     filtrados = filtrados.filter(r => {
       const forn = (r.FORNECEDOR || r.fornecedor || r.FORNECEDOR_ID || '').toLowerCase();
       const id = (r.REVISION_ID || r.revision_id || r.id_do_rolo || '').toLowerCase();
       const lote = (r.LOTE || r.lote || '').toLowerCase();
-      return forn.includes(fornecedor) || id.includes(fornecedor) || lote.includes(fornecedor);
+      return forn.includes(state.fornecedor) || id.includes(state.fornecedor) || lote.includes(state.fornecedor);
     });
   }
 
-  if (dataInicio) {
-    const inicio = new Date(dataInicio).getTime();
+  if (state.dataInicio) {
+    const inicio = new Date(state.dataInicio).getTime();
     filtrados = filtrados.filter(r => {
       const d = new Date(r.DATA_ATUALIZACAO || r.data_atualizacao || r.DATA_REGISTRO || r.created_at || 0).getTime();
       return !isNaN(d) && d >= inicio;
     });
   }
 
-  if (status) {
+  if (state.status) {
     filtrados = filtrados.filter(r => {
-      const fase = String(r.FASE_ATUAL || r.fase_atual || '').toLowerCase();
-      const caseStatus = String(r.compras_status_case || r.COMPRAS_STATUS_CASE || '').toLowerCase();
-      const resolvido = fase === 'finalizado_reprovado' || (fase === 'em_estoque' && caseStatus !== 'em_negociacao') || fase === 'aprovado_compras' || fase === 'reprovado_compras' || caseStatus === 'resolvido';
-
-      if (status === 'PENDENTE') return !resolvido && caseStatus !== 'em_negociacao';
-      if (status === 'EM_NEGOCIACAO') return caseStatus === 'em_negociacao';
-      if (status === 'RESOLVIDO') return resolvido;
+      const statusInfo = getComprasStatusInfo(r);
+      if (state.status === 'PENDENTE') return !statusInfo.resolvido && !statusInfo.emNegociacao;
+      if (state.status === 'EM_NEGOCIACAO') return !statusInfo.resolvido && statusInfo.emNegociacao;
+      if (state.status === 'RESOLVIDO') return statusInfo.resolvido;
       return true;
     });
   }
 
+  return filtrados;
+}
+
+function renderComprasByCurrentFilters(options = {}) {
+  const contextLabel = options.contextLabel || 'atualização automática';
+  const showSuccessToast = !!options.showSuccessToast;
+  const showEmptyToast = !!options.showEmptyToast;
+
+  const filtros = getComprasFiltersState();
+  const filtrados = filterComprasCases(allCompras, filtros);
+  const total = comprasTotalReferencia || allCompras.length;
+
   if (!filtrados.length) {
     const container = document.getElementById('comprasList');
     if (container) container.innerHTML = '<div class="empty">Nenhum resultado para os filtros selecionados.</div>';
-    showToast('Nenhum resultado encontrado em Compras.', 'warn');
-    return;
+
+    const emptyContext = filtros.filtroAtivo ? 'filtro sem resultados' : contextLabel;
+    updateComprasCards([], emptyContext);
+    updateComprasFilterIndicator(0, total, filtros.filtroAtivo);
+
+    if (showEmptyToast) {
+      showToast('Nenhum resultado encontrado em Compras.', 'warn');
+    }
+
+    return {
+      filtros,
+      filtrados,
+      hasResults: false
+    };
   }
 
   renderCompras(filtrados);
-  showToast('Filtros de Compras aplicados.', 'success');
+
+  const cardsContext = filtros.filtroAtivo ? 'filtros aplicados' : contextLabel;
+  updateComprasCards(filtrados, cardsContext);
+  updateComprasFilterIndicator(filtrados.length, total, filtros.filtroAtivo);
+
+  if (showSuccessToast) {
+    showToast('Filtros de Compras aplicados.', 'success');
+  }
+
+  return {
+    filtros,
+    filtrados,
+    hasResults: true
+  };
+}
+
+function filtrarCompras(options = {}) {
+  const silent = !!options.silent;
+
+  const result = renderComprasByCurrentFilters({
+    contextLabel: 'filtros aplicados',
+    showSuccessToast: !silent,
+    showEmptyToast: !silent
+  });
+
+  saveFilterSection('compras', {
+    status: String(document.getElementById('filtroStatusCompras')?.value || ''),
+    fornecedor: String(document.getElementById('filtroFornecedorCompras')?.value || ''),
+    dataInicio: String(document.getElementById('dataInicioCompras')?.value || '')
+  });
+
+  if (result.filtros.filtroAtivo && !result.hasResults) {
+    return;
+  }
 }
 
 function resolverCasoCompras(id, safeId) {
@@ -3835,8 +5038,16 @@ function limparFiltrosCompras() {
   document.getElementById('filtroFornecedorCompras').value = '';
   document.getElementById('dataInicioCompras').value = '';
 
-  renderCompras(allCompras);
+  renderComprasByCurrentFilters({
+    contextLabel: 'filtros limpos'
+  });
   showToast('Filtros de Compras limpos.', 'info');
+
+  saveFilterSection('compras', {
+    status: '',
+    fornecedor: '',
+    dataInicio: ''
+  });
 }
 
 function atualizarMetricas() {
@@ -3850,6 +5061,10 @@ function atualizarMetricas() {
 
   renderMetricas(filtrados);
   showToast('Métricas atualizadas.', 'success');
+
+  saveFilterSection('metricas', {
+    periodo: document.getElementById('periodoMetricas')?.value || '30'
+  });
 }
 
 function renderMetricas(rolos) {
@@ -4379,26 +5594,20 @@ function updateStats(rolos) {
     const comprasTotal = allCompras ? allCompras.length : 0;
     const estoque = rolos ? rolos.length : (allRolos ? allRolos.length : 0);
 
-    const comprasPendentes = (allCompras || []).filter(r => {
-      const s = (r.FASE_ATUAL || r.fase_atual || r.STATUS_COMPRAS || r.status_compras || '').toString().toLowerCase();
-      return s === 'enviado_compras' || s.includes('enviado_compras') || s.includes('pendente');
-    }).length;
-
-    const comprasNegociacao = (allCompras || []).filter(r => {
-      const s = (r.FASE_ATUAL || r.fase_atual || r.STATUS_COMPRAS || r.status_compras || '').toString().toLowerCase();
-      return s.includes('negociacao') || s.includes('negociando');
-    }).length;
-
-    const comprasResolvidos = (allCompras || []).filter(r => {
-      const s = (r.FASE_ATUAL || r.fase_atual || r.STATUS_FINAL || r.status_final || '').toString().toLowerCase();
-      return s.includes('aprovado_compras') || s.includes('reprovado_compras') || s.includes('finalizado_reprovado') || s.includes('finalizado');
-    }).length;
-
-    const comprasPendentesTotal = comprasPendentes + comprasNegociacao;
+    const comprasKpis = calculateComprasKpis(allCompras || []);
+    const comprasPendentes = comprasKpis.pendentes;
+    const comprasNegociacao = comprasKpis.negociacao;
+    const comprasResolvidos = comprasKpis.resolvidos;
+    const tempoMedioComprasDias = comprasKpis.tempoMedioDias;
   
-  const agora = new Date();
-  const inicioMes = new Date(agora.getFullYear(), agora.getMonth(), 1).getTime();
-  const fimMes = agora.getTime();
+  const periodoDias = getVisaoGeralPeriodDays();
+  updateVisaoGeralPeriodLabels(periodoDias);
+
+  const agora = Date.now();
+  const janelaMs = periodoDias * 24 * 60 * 60 * 1000;
+  const inicioAtual = agora - janelaMs;
+  const inicioAnterior = inicioAtual - janelaMs;
+  const fimAtual = agora;
 
   function normalizeStatus(rolo) {
     return String(
@@ -4447,49 +5656,73 @@ function updateStats(rolos) {
   }
 
   const consolidados = [].concat(allRolos || [], allAguardando || [], allCompras || []);
-  let aprovados = 0;
-  let reprovados = 0;
-  let pendentes = 0;
-  let totalPeriodo = 0;
-  let totalDefeitos = 0;
-  let totalMetros = 0;
-  let somaTempoDias = 0;
-  let tempoCount = 0;
 
-  consolidados.forEach((r) => {
-    const ts = getDateTs(r);
-    if (!ts || ts < inicioMes || ts > fimMes) return;
+  function calcularMetricasJanela(startTs, endTs) {
+    let aprovados = 0;
+    let reprovados = 0;
+    let pendentes = 0;
+    let totalPeriodo = 0;
+    let totalDefeitos = 0;
+    let totalMetros = 0;
+    let somaTempoDias = 0;
+    let tempoCount = 0;
 
-    totalPeriodo++;
-    const status = normalizeStatus(r);
+    consolidados.forEach((r) => {
+      const ts = getDateTs(r);
+      if (!ts || ts < startTs || ts >= endTs) return;
 
-    if (isAprovado(status)) aprovados++;
-    if (isReprovado(status)) reprovados++;
-    if (isPendente(status)) pendentes++;
+      totalPeriodo++;
+      const status = normalizeStatus(r);
 
-    totalDefeitos += getDefeitosCount(r);
-    totalMetros += getMetros(r);
+      if (isAprovado(status)) aprovados++;
+      if (isReprovado(status)) reprovados++;
+      if (isPendente(status)) pendentes++;
 
-    if (isAprovado(status) || isReprovado(status)) {
-      const dataRegistro = r.DATA_REGISTRO || r.created_at || null;
-      if (dataRegistro) {
-        const dRegistro = new Date(dataRegistro);
-        if (!isNaN(dRegistro.getTime())) {
-          const diffDias = (ts - dRegistro.getTime()) / (1000 * 60 * 60 * 24);
-          if (diffDias >= 0) {
-            somaTempoDias += diffDias;
-            tempoCount++;
+      totalDefeitos += getDefeitosCount(r);
+      totalMetros += getMetros(r);
+
+      if (isAprovado(status) || isReprovado(status)) {
+        const dataRegistro = r.DATA_REGISTRO || r.created_at || null;
+        if (dataRegistro) {
+          const dRegistro = new Date(dataRegistro);
+          if (!isNaN(dRegistro.getTime())) {
+            const diffDias = (ts - dRegistro.getTime()) / (1000 * 60 * 60 * 24);
+            if (diffDias >= 0) {
+              somaTempoDias += diffDias;
+              tempoCount++;
+            }
           }
         }
       }
-    }
-  });
+    });
 
-  const totalDecisoes = aprovados + reprovados;
-  const taxaReprovacao = totalDecisoes > 0 ? ((reprovados / totalDecisoes) * 100).toFixed(1) : '0.0';
-  const defeitos100m = totalMetros > 0 ? ((totalDefeitos / totalMetros) * 100).toFixed(2) : '0';
-  const pendenciasPct = totalPeriodo > 0 ? ((pendentes / totalPeriodo) * 100).toFixed(1) : '0.0';
-  const tempoMedio = tempoCount > 0 ? (somaTempoDias / tempoCount).toFixed(1) : '0.0';
+    const totalDecisoes = aprovados + reprovados;
+
+    return {
+      taxaReprovacaoNum: totalDecisoes > 0 ? (reprovados / totalDecisoes) * 100 : 0,
+      defeitos100mNum: totalMetros > 0 ? (totalDefeitos / totalMetros) * 100 : 0,
+      pendenciasPctNum: totalPeriodo > 0 ? (pendentes / totalPeriodo) * 100 : 0,
+      tempoMedioNum: tempoCount > 0 ? (somaTempoDias / tempoCount) : 0
+    };
+  }
+
+  const metricasAtual = calcularMetricasJanela(inicioAtual, fimAtual);
+  const metricasAnterior = calcularMetricasJanela(inicioAnterior, inicioAtual);
+
+  const taxaReprovacao = metricasAtual.taxaReprovacaoNum.toFixed(1);
+  const defeitos100m = metricasAtual.defeitos100mNum.toFixed(2);
+  const pendenciasPct = metricasAtual.pendenciasPctNum.toFixed(1);
+  const tempoMedio = metricasAtual.tempoMedioNum.toFixed(1);
+
+  const deltaTaxaReprovacao = metricasAtual.taxaReprovacaoNum - metricasAnterior.taxaReprovacaoNum;
+  const deltaPendencias = metricasAtual.pendenciasPctNum - metricasAnterior.pendenciasPctNum;
+
+  updateKpiTraceability({
+    periodoDias,
+    baseTotal: consolidados.length,
+    taxaReprovacaoNum: metricasAtual.taxaReprovacaoNum,
+    pendenciasPctNum: metricasAtual.pendenciasPctNum
+  });
 
   console.log('[ESTOQUE] 📊 updateStats:', {
     estoque: estoque,
@@ -4498,6 +5731,7 @@ function updateStats(rolos) {
     comprasPendentes: comprasPendentes,
     comprasNegociacao: comprasNegociacao,
     comprasResolvidos: comprasResolvidos,
+    tempoMedioComprasDias: tempoMedioComprasDias != null ? tempoMedioComprasDias.toFixed(1) : '-',
     taxaReprovacao: taxaReprovacao + '%',
     defeitos100m: defeitos100m,
     pendenciasPct: pendenciasPct + '%',
@@ -4512,12 +5746,24 @@ function updateStats(rolos) {
 
   const kpiReprovacao = document.getElementById('kpiReprovacao');
   if (kpiReprovacao) kpiReprovacao.textContent = taxaReprovacao + '%';
+  const kpiReprovacaoDeltaTop = document.getElementById('kpiReprovacaoDeltaTop');
+  if (kpiReprovacaoDeltaTop) {
+    kpiReprovacaoDeltaTop.textContent = formatPercentVariation(metricasAtual.taxaReprovacaoNum, metricasAnterior.taxaReprovacaoNum);
+  }
 
   const kpiDefeitos = document.getElementById('kpiDefeitos100m');
   if (kpiDefeitos) kpiDefeitos.textContent = defeitos100m;
+  const kpiDefeitosDeltaTop = document.getElementById('kpiDefeitos100mDeltaTop');
+  if (kpiDefeitosDeltaTop) {
+    kpiDefeitosDeltaTop.textContent = formatPercentVariation(metricasAtual.defeitos100mNum, metricasAnterior.defeitos100mNum);
+  }
 
   const kpiPendencias = document.getElementById('kpiPendenciasPct');
   if (kpiPendencias) kpiPendencias.textContent = pendenciasPct + '%';
+  const kpiPendenciasDeltaTop = document.getElementById('kpiPendenciasDeltaTop');
+  if (kpiPendenciasDeltaTop) {
+    kpiPendenciasDeltaTop.textContent = formatPercentVariation(metricasAtual.pendenciasPctNum, metricasAnterior.pendenciasPctNum);
+  }
 
 
   const taxaReprovacaoElem = document.getElementById('taxaReprovacao');
@@ -4528,6 +5774,9 @@ function updateStats(rolos) {
 
   const pendenciasElem = document.getElementById('pendenciasPct');
   if (pendenciasElem) pendenciasElem.textContent = pendenciasPct + '%';
+
+  applyDeltaText('taxaReprovacaoDelta', deltaTaxaReprovacao, true);
+  applyDeltaText('pendenciasDelta', deltaPendencias, true);
 
   
   // Atualizar estatísticas do estoque
@@ -4550,15 +5799,7 @@ function updateStats(rolos) {
   }
   
   // Atualizar métricas de compras
-  const elem1 = document.getElementById('comprasPendentes');
-  const elem2 = document.getElementById('comprasNegociacao');
-  const elem3 = document.getElementById('comprasResolvidos');
-  const elem4 = document.getElementById('tempoMedioCompras');
-  
-  if (elem1) elem1.textContent = comprasPendentes;
-  if (elem2) elem2.textContent = comprasNegociacao;
-  if (elem3) elem3.textContent = comprasResolvidos;
-  if (elem4) elem4.textContent = '2d'; // TODO: Calcular tempo médio real
+  updateComprasCards(allCompras || [], 'dados consolidados');
   
   // Gerar alertas críticos
   try {
@@ -4651,6 +5892,43 @@ function gerarAlertasCriticos() {
   }
 }
 
+function openAlertCta(tabName) {
+  const targetBtn = document.querySelector('.tab-btn[data-tab="' + tabName + '"]');
+  switchTab(tabName, targetBtn || null);
+}
+
+function getAlertThresholds(totalBase, periodoDias) {
+  const volume = Number(totalBase || 0);
+  const period = Number(periodoDias || 30);
+
+  const volumeFactor = volume >= 200 ? 1.4 : (volume >= 100 ? 1.2 : (volume <= 30 ? 0.8 : 1));
+
+  const filaSupervisorWarning = Math.max(4, Math.round(5 * volumeFactor));
+  const filaSupervisorCritical = Math.max(filaSupervisorWarning + 2, Math.round(10 * volumeFactor));
+
+  const diasParadoWarning = 3;
+  const diasParadoCritical = 7;
+  const qtdParadoCritical = Math.max(3, Math.round(filaSupervisorWarning * 0.5));
+
+  const taxaReprovacaoWarning = period <= 7 ? 10 : (period <= 30 ? 8 : 6);
+  const taxaReprovacaoCritical = taxaReprovacaoWarning + 5;
+
+  const comprasBacklogWarning = Math.max(4, Math.round(6 * volumeFactor));
+  const comprasBacklogCritical = comprasBacklogWarning + 4;
+
+  return {
+    filaSupervisorWarning,
+    filaSupervisorCritical,
+    diasParadoWarning,
+    diasParadoCritical,
+    qtdParadoCritical,
+    taxaReprovacaoWarning,
+    taxaReprovacaoCritical,
+    comprasBacklogWarning,
+    comprasBacklogCritical
+  };
+}
+
 function renderAlerts() {
   try {
     const container = document.getElementById('alertsContainer');
@@ -4678,15 +5956,21 @@ function renderAlerts() {
     const aguardando = base.filter(r => (r.FASE_ATUAL || r.fase_atual) === 'aguardando_supervisor');
     const compras = base.filter(r => (r.FASE_ATUAL || r.fase_atual) === 'enviado_compras');
     const estoque = base.filter(r => (r.FASE_ATUAL || r.fase_atual) === 'em_estoque');
+    const thresholds = getAlertThresholds(base.length, getVisaoGeralPeriodDays());
   
   // 🔴 ALERTA 1: Muitos tecidos aguardando análise
-  if (aguardando.length > 5) {
+  if (aguardando.length >= thresholds.filaSupervisorWarning) {
+    const nivel = aguardando.length >= thresholds.filaSupervisorCritical ? 'critical' : 'warning';
     alertas.push({
-      nivel: 'critical',
-      icone: '🔴',
+      nivel,
+      icone: nivel === 'critical' ? '🔴' : '🟡',
       titulo: aguardando.length + ' rolos aguardando análise',
-      descricao: 'Alta demanda de revisão do supervisor',
-      cor: '#ff6b6b'
+      descricao: 'Limiar atual: ' + thresholds.filaSupervisorWarning + '+ rolos na fila do supervisor',
+      acao: 'Ação recomendada: priorizar análise dos itens mais antigos na aba Análise do Supervisor.',
+      ctaLabel: 'Ir para Análise',
+      ctaTab: 'analise-supervisor',
+      score: (aguardando.length * 10) + (nivel === 'critical' ? 40 : 20),
+      cor: nivel === 'critical' ? '#ff6b6b' : '#ffa500'
     });
   }
   
@@ -4694,16 +5978,27 @@ function renderAlerts() {
   const paradosHaMuitoTempo = aguardando.filter(r => {
     const dataRegistro = new Date(r.DATA_REGISTRO || r.created_at || 0);
     const diasParados = Math.floor((new Date() - dataRegistro) / (1000 * 60 * 60 * 24));
-    return diasParados > 3;
+    return diasParados >= thresholds.diasParadoWarning;
   });
   
   if (paradosHaMuitoTempo.length > 0) {
+    const maxDiasParados = paradosHaMuitoTempo.reduce((max, r) => {
+      const dataRegistro = new Date(r.DATA_REGISTRO || r.created_at || 0);
+      const dias = Math.floor((Date.now() - dataRegistro.getTime()) / (1000 * 60 * 60 * 24));
+      return isNaN(dias) ? max : Math.max(max, dias);
+    }, 0);
+
+    const nivel = (maxDiasParados >= thresholds.diasParadoCritical || paradosHaMuitoTempo.length >= thresholds.qtdParadoCritical) ? 'critical' : 'warning';
     alertas.push({
-      nivel: 'warning',
-      icone: '🟡',
-      titulo: paradosHaMuitoTempo.length + ' rolos parados há >3 dias',
-      descricao: 'Necessário análise urgente',
-      cor: '#ffa500'
+      nivel,
+      icone: nivel === 'critical' ? '🔴' : '🟡',
+      titulo: paradosHaMuitoTempo.length + ' rolos parados há >=' + thresholds.diasParadoWarning + ' dias',
+      descricao: 'Maior tempo parado: ' + maxDiasParados + ' dias',
+      acao: 'Ação recomendada: tratar primeiro os rolos com mais de 3 dias sem decisão.',
+      ctaLabel: 'Abrir fila do Supervisor',
+      ctaTab: 'analise-supervisor',
+      score: (paradosHaMuitoTempo.length * 12) + (maxDiasParados * 2) + (nivel === 'critical' ? 35 : 20),
+      cor: nivel === 'critical' ? '#ff6b6b' : '#ffa500'
     });
   }
   
@@ -4720,26 +6015,58 @@ function renderAlerts() {
     }).length;
     const totalDecisoes = aprovados + reprovados;
     const taxaReprovacao = totalDecisoes > 0 ? (reprovados / totalDecisoes) * 100 : 0;
-    if (taxaReprovacao > 10) {
+    if (taxaReprovacao >= thresholds.taxaReprovacaoWarning) {
+      const nivel = taxaReprovacao >= thresholds.taxaReprovacaoCritical ? 'critical' : 'warning';
       alertas.push({
-        nivel: 'info',
-        icone: '🟡',
+        nivel,
+        icone: nivel === 'critical' ? '🔴' : '🟡',
         titulo: 'Taxa de reprovacao: ' + taxaReprovacao.toFixed(1) + '%',
-        descricao: 'Meta: <= 5% - Necessario melhorar qualidade',
-        cor: '#ffa500'
+        descricao: 'Limiar atual: >= ' + thresholds.taxaReprovacaoWarning.toFixed(1) + '% no período selecionado',
+        acao: 'Ação recomendada: revisar fornecedores com mais defeitos e abrir plano de contenção.',
+        ctaLabel: 'Ver Métricas de Qualidade',
+        ctaTab: 'metricas-qualidade',
+        score: Math.round(taxaReprovacao * 3) + (nivel === 'critical' ? 30 : 15),
+        cor: nivel === 'critical' ? '#ff6b6b' : '#ffa500'
       });
     }
   }
+
+  // 🟠 ALERTA 4: Backlog em Compras
+  const comprasKpis = calculateComprasKpis(safeAllCompras);
+  const backlogCompras = (comprasKpis.pendentes || 0) + (comprasKpis.negociacao || 0);
+  if (backlogCompras >= thresholds.comprasBacklogWarning) {
+    const nivel = backlogCompras >= thresholds.comprasBacklogCritical ? 'critical' : 'warning';
+    alertas.push({
+      nivel,
+      icone: nivel === 'critical' ? '🔴' : '🟠',
+      titulo: backlogCompras + ' casos abertos em Compras',
+      descricao: (comprasKpis.negociacao || 0) + ' em negociação e ' + (comprasKpis.pendentes || 0) + ' pendentes (limiar: ' + thresholds.comprasBacklogWarning + '+)',
+      acao: 'Ação recomendada: priorizar resolução dos casos mais antigos com fornecedor.',
+      ctaLabel: 'Ir para Compras',
+      ctaTab: 'acompanhamento-compras',
+      score: (backlogCompras * 8) + (nivel === 'critical' ? 28 : 14),
+      cor: nivel === 'critical' ? '#ff6b6b' : '#ff9500'
+    });
+  }
+
+  alertas.sort((a, b) => (b.score || 0) - (a.score || 0));
+  const topAlertas = alertas.slice(0, 4);
+  registerProactiveNotificationsFromAlerts(topAlertas);
   
   // Renderizar alertas
-  if (alertas.length === 0) {
+  if (topAlertas.length === 0) {
     container.innerHTML = ''; // Sem alertas
+    updateProactiveNotificationStatus(0, getProactiveNotificationQueue().length, 0);
     return;
   }
   
-  const html = alertas.map((alerta, idx) => {
+  const html = topAlertas.map((alerta) => {
     const bgColor = alerta.cor + '15';
     const borderColor = alerta.cor;
+    const ctaHtml = alerta.ctaTab && alerta.ctaLabel
+      ? '<button class="btn btn-secondary" onclick="openAlertCta(\'' + alerta.ctaTab + '\')" style="padding: 6px 10px; font-size: 12px; white-space: nowrap;">' + escapeHtml(alerta.ctaLabel) + '</button>'
+      : '';
+
     return '<div style="' +
       'background: ' + bgColor + ';' +
       'border-left: 4px solid ' + borderColor + ';' +
@@ -4747,18 +6074,23 @@ function renderAlerts() {
       'padding: 12px 16px;' +
       'margin-bottom: 8px;' +
       'display: flex;' +
-      'align-items: center;' +
+      'align-items: flex-start;' +
+      'justify-content: space-between;' +
       'gap: 12px;' +
       'font-size: 13px;' +
     '">' +
-      '<span style="font-size: 20px;">' + alerta.icone + '</span>' +
-      '<div>' +
-        '<div style="font-weight: 600; color: ' + alerta.cor + ';">' + escapeHtml(alerta.titulo) + '</div>' +
-        '<div style="color: var(--text-secondary); font-size: 12px; margin-top: 2px;">' + escapeHtml(alerta.descricao) + '</div>' +
+      '<div style="display: flex; gap: 12px; align-items: flex-start; flex: 1; min-width: 0;">' +
+        '<span style="font-size: 20px;">' + alerta.icone + '</span>' +
+        '<div>' +
+          '<div style="font-weight: 600; color: ' + alerta.cor + ';">' + escapeHtml(alerta.titulo) + '</div>' +
+          '<div style="color: var(--text-secondary); font-size: 12px; margin-top: 2px;">' + escapeHtml(alerta.descricao) + '</div>' +
+          '<div style="color: var(--text-primary); font-size: 12px; margin-top: 4px; font-weight: 600;">' + escapeHtml(alerta.acao || '') + '</div>' +
+        '</div>' +
       '</div>' +
+      '<div style="flex-shrink: 0;">' + ctaHtml + '</div>' +
     '</div>';
   }).join('');
-  
+
   container.innerHTML = html;
   } catch (renderErr) {
     console.error('[ESTOQUE] ❌ Erro em renderAlerts:', renderErr);
@@ -5037,6 +6369,25 @@ function exportarDadosMetricas() {
     'Status': r.STATUS_FINAL || '-'
   }));
   exportarCSV(dados, 'Metricas_' + new Date().toISOString().split('T')[0] + '.csv');
+}
+
+function exportarListaReposicaoCritica() {
+  const dadosFiltrados = applyReposicaoFiltersToList(reposicaoDadosCriticos);
+  const dados = dadosFiltrados.map(item => ({
+    'Fornecedor': item.fornecedor,
+    'Produto': item.produto,
+    'Cor': item.cor,
+    'Tipo': item.tipoTecido,
+    'Disponivel': item.disponivel.toFixed(1) + ' ' + item.unidade,
+    'Consumo_Medio_Diario': (item.consumoMedioDiario || 0).toFixed(2) + ' ' + item.unidade,
+    'Cobertura_Estimada': item.coberturaLabel || '-',
+    'Faixa_Risco': item.faixaRisco || '-',
+    'Nivel': item.nivel,
+    'Sugestao_Compra': item.sugestaoCompra.toFixed(1) + ' ' + item.unidade,
+    'Justificativa': item.justificativa
+  }));
+
+  exportarCSV(dados, 'Reposicao_Critica_' + new Date().toISOString().split('T')[0] + '.csv');
 }
 
 function exportarDadosRevisores(ranking = null) {
