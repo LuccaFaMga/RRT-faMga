@@ -70,12 +70,13 @@ async function callBackendFunction(functionName, args = []) {
     args
   };
 
+  const body = 'payload=' + encodeURIComponent(JSON.stringify(payload));
   const response = await fetch(BACKEND_API_URL, {
     method: 'POST',
     headers: {
-      'Content-Type': 'application/json'
+      'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8'
     },
-    body: JSON.stringify(payload)
+    body
   });
 
   if (!response.ok) {

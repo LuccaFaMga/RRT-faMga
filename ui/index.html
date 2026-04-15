@@ -26,7 +26,7 @@
         function isGASRunAvailable() { return typeof google !== 'undefined' && google && google.script && google.script.run; }
         function createGASRunProxy(state) {
           const runner = { withSuccessHandler(fn) { return createGASRunProxy({...state, successHandler:fn}); }, withFailureHandler(fn) { return createGASRunProxy({...state, failureHandler:fn}); }, withUserObject(obj) { return createGASRunProxy({...state, userObject:obj}); } };
-          return new Proxy(runner, { get(t,p) { if(p in t) return t[p].bind(t); return async function(...args) { if(!BACKEND_API_URL||BACKEND_API_URL.includes('REPLACE')) { const err=new Error('BACKEND_API_URL nao configurada'); if(state.failureHandler) state.failureHandler(err); return Promise.reject(err); } try { const res=await fetch(BACKEND_API_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'runFunction',functionName:p,args})}).then(r=>r.json()); if(res&&res.status==='FALHA') throw new Error(res.message||'Erro'); if(state.successHandler) state.successHandler(res); return res; } catch(err) { if(state.failureHandler) state.failureHandler(err); else console.error('[shim]',err); throw err; } }; } });
+          return new Proxy(runner, { get(t,p) { if(p in t) return t[p].bind(t); return async function(...args) { if(!BACKEND_API_URL||BACKEND_API_URL.includes('REPLACE')) { const err=new Error('BACKEND_API_URL nao configurada'); if(state.failureHandler) state.failureHandler(err); return Promise.reject(err); } try { const body = 'payload=' + encodeURIComponent(JSON.stringify({action:'runFunction',functionName:p,args})); const res=await fetch(BACKEND_API_URL,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'},body}).then(r=>r.json()); if(res&&res.status==='FALHA') throw new Error(res.message||'Erro'); if(state.successHandler) state.successHandler(res); return res; } catch(err) { if(state.failureHandler) state.failureHandler(err); else console.error('[shim]',err); throw err; } }; } });
         }
         if (!isGASRunAvailable()) { window.google=window.google||{}; window.google.script=window.google.script||{}; window.google.script.run=createGASRunProxy({successHandler:null,failureHandler:null,userObject:null}); console.log('[backend-shim] google.script.run ok'); }
     </script>
@@ -798,7 +798,7 @@
                             <h3>Revisão de Tecidos</h3>
                             <p>Scanner de QR Code, registro de defeitos e geração de relatórios completos de qualidade</p>
                         </div>
-                        <a href="<?= APP_URL ?>?page=reviewer" class="btn btn-primary btn-block">
+                        <a href="./reviewer.html" class="btn btn-primary btn-block">
                             <i class="fas fa-play"></i>
                             Iniciar Revisão
                         </a>
@@ -812,7 +812,7 @@
                             <h3>Gestão de Tecidos</h3>
                             <p>Visualize, gerencie tecidos, aprove revisões e controle movimentações</p>
                         </div>
-                        <a href="<?= APP_URL ?>?page=estoque" class="btn btn-primary btn-block">
+                        <a href="./estoque.html" class="btn btn-primary btn-block">
                             <i class="fas fa-boxes"></i>
                             Gerenciar Estoque
                         </a>

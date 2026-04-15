@@ -158,7 +158,14 @@ function doPost(e) {
     let response;
 
     try {
-        const payload = JSON.parse(e.postData.contents);
+        let payload;
+        if (e.postData && e.postData.type === 'application/x-www-form-urlencoded' && e.parameter && e.parameter.payload) {
+            payload = JSON.parse(decodeURIComponent(e.parameter.payload));
+        } else if (e.postData && e.postData.contents) {
+            payload = JSON.parse(e.postData.contents);
+        } else {
+            throw new Error('Corpo da requisição inválido');
+        }
         const action = payload.action || "processar_revisao";
 
         try { logFlowMain(payload.id_do_rolo || payload.id || '-', 'DOPOST_START', { action: action, payload: payload }); } catch (e) { }
@@ -196,7 +203,19 @@ function doPost(e) {
 
     return ContentService
         .createTextOutput(JSON.stringify(response))
-        .setMimeType(ContentService.MimeType.JSON);
+        .setMimeType(ContentService.MimeType.JSON)
+        .setHeader('Access-Control-Allow-Origin', '*')
+        .setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS')
+        .setHeader('Access-Control-Allow-Headers', 'Content-Type');
+}
+
+function doOptions(e) {
+    return ContentService
+        .createTextOutput('')
+        .setMimeType(ContentService.MimeType.TEXT)
+        .setHeader('Access-Control-Allow-Origin', '*')
+        .setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS')
+        .setHeader('Access-Control-Allow-Headers', 'Content-Type');
 }
 
 function runBackendFunction(payload) {
