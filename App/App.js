@@ -167,7 +167,8 @@ function doPost(e) {
             case "processar_revisao": response = processarRRT_Web(payload); break;
             case "supervisor_update": response = handleSupervisorUpdate(payload); break;
             case "supervisor_decision": response = handleSupervisorDecision(payload); break;
-            
+            case "runFunction": response = runBackendFunction(payload); break;
+
             // Ações dos Controllers existentes
             case "handleWithdrawal": response = handleWithdrawal(payload); break;
             case "getRollsByStatus": response = getRollsByStatus_Web(payload); break;
@@ -196,6 +197,39 @@ function doPost(e) {
     return ContentService
         .createTextOutput(JSON.stringify(response))
         .setMimeType(ContentService.MimeType.JSON);
+}
+
+function runBackendFunction(payload) {
+    const functionName = String(payload?.functionName || '').trim();
+    const args = Array.isArray(payload?.args) ? payload.args : (payload?.args === undefined ? [] : [payload.args]);
+
+    const allowedFunctions = {
+        processarRRT_Web,
+        getKPIDashboardData,
+        getKPIDashboardData_Web,
+        getRollsByStatus_Web,
+        getRollsByStatus,
+        getComprasCases_Web,
+        getComprasCases,
+        getSolicitacoesCorte_Web,
+        getSolicitacoesCorte,
+        getReviewerMetrics_Web,
+        getReviewerMetricsRange_Web,
+        processSupervisorDecision_Web,
+        processarDecisaoComprasV2_Web,
+        atualizarPendenciaCompras_Web,
+        sendProactiveNotifications_Web,
+        registrarSolicitacaoCorte_Web,
+        getFotosByRevisionId_Web,
+        getImageAsBase64_Web
+    };
+
+    const fn = allowedFunctions[functionName];
+    if (typeof fn !== 'function') {
+        throw new Error(`Função de backend não permitida: ${functionName}`);
+    }
+
+    return fn.apply(null, args);
 }
 
 /* ============================================================

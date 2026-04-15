@@ -42,10 +42,10 @@ const STORE_REVIEWS = 'offline-reviews';
 
 // ✅ Arquivos essenciais para offline (sem Chart.js que agora é lazy-loaded)
 const ESSENTIAL_ASSETS = [
-  '/index.html',
-  '/ui/reviewer.html',
-  '/ui/estoque.html',
-  '/ui/index.html',
+  'index.html',
+  'ui/reviewer.html',
+  'ui/estoque.html',
+  'ui/index.html',
   'https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap'
   // ⚡ OTIMIZAÇÃO: Font Awesome não carregado no install (lazy ou on-demand)
 ];
