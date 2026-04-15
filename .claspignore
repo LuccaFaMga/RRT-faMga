@@ -1,0 +1,15 @@
+scripts/generate-icons.js
+scripts/temp_extract.js
+node_modules/**
+.git/**
+README.md
+.gitignore
+package.json
+package-lock.json
+manifest.json
+service-worker.js
+offline-manager.js
+icons/**
+ui/**
+.vscode/**
+*.md
