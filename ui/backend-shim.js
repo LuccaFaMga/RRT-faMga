@@ -70,11 +70,20 @@ async function callBackendFunction(functionName, args = []) {
     args
   };
 
+  try {
+    return await callBackendFunctionFetch(payload);
+  } catch (fetchError) {
+    console.warn('[backend-shim] fetch falhou, tentando JSONP fallback', fetchError);
+    return await callBackendFunctionJSONP(payload);
+  }
+}
+
+async function callBackendFunctionFetch(payload) {
   const body = 'payload=' + encodeURIComponent(JSON.stringify(payload));
   const response = await fetch(BACKEND_API_URL, {
     method: 'POST',
     headers: {
-      'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8'
+      'Content-Type': 'application/x-www-form-urlencoded'
     },
     body
   });
@@ -90,6 +99,43 @@ async function callBackendFunction(functionName, args = []) {
   }
 
   return data;
+}
+
+function callBackendFunctionJSONP(payload) {
+  return new Promise((resolve, reject) => {
+    const callbackName = `__gas_jsonp_cb_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    const url = `${BACKEND_API_URL}?callback=${encodeURIComponent(callbackName)}&payload=${encodeURIComponent(JSON.stringify(payload))}`;
+    const script = document.createElement('script');
+    let timeoutId;
+
+    function cleanup() {
+      if (timeoutId) clearTimeout(timeoutId);
+      delete window[callbackName];
+      if (script.parentNode) script.parentNode.removeChild(script);
+    }
+
+    window[callbackName] = function(result) {
+      cleanup();
+      if (result && result.status === 'FALHA') {
+        reject(new Error(result.message || 'Erro no backend'));
+      } else {
+        resolve(result);
+      }
+    };
+
+    script.onerror = function() {
+      cleanup();
+      reject(new Error('JSONP load failed'));
+    };
+
+    timeoutId = setTimeout(() => {
+      cleanup();
+      reject(new Error('JSONP timeout'));
+    }, 10000);
+
+    script.src = url;
+    document.head.appendChild(script);
+  });
 }
 
 if (!isGASRunAvailable()) {

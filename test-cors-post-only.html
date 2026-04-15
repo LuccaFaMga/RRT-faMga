@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>🧪 Teste CORS (POST Only) - GAS Backend</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: 'Segoe UI', -apple-system, sans-serif; 
+            padding: 20px; 
+            background: #f5f5f5;
+            line-height: 1.6;
+        }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { color: #333; margin-bottom: 20px; }
+        .box { 
+            background: white; 
+            border-left: 4px solid #ccc; 
+            padding: 15px; 
+            margin: 10px 0; 
+            border-radius: 4px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .box.info { border-left-color: #2196F3; background: #e3f2fd; }
+        .box.ok { border-left-color: #4CAF50; background: #e8f5e9; }
+        .box.error { border-left-color: #f44336; background: #ffebee; }
+        .box.warning { border-left-color: #ff9800; background: #fff3e0; }
+        .box.success { border-left-color: #4CAF50; background: #c8e6c9; font-weight: bold; }
+        code { 
+            background: #f1f1f1; 
+            padding: 2px 6px; 
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+        }
+        pre { 
+            background: #f1f1f1; 
+            padding: 10px; 
+            border-radius: 4px;
+            overflow-x: auto;
+            margin: 10px 0;
+            font-size: 12px;
+        }
+        button { 
+            background: #2196F3; 
+            color: white; 
+            border: none; 
+            padding: 10px 20px; 
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            margin-top: 10px;
+        }
+        button:hover { background: #1976D2; }
+        .status-ok { color: #2e7d32; font-weight: bold; }
+        .status-error { color: #c62828; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🧪 Teste CORS (Método: POST Simples)</h1>
+        <p><em>GAS não suporta preflight OPTIONS, usando POST direto com headers simples</em></p>
+        <div id="results"></div>
+        <button onclick="location.reload()">Executar Novamente</button>
+    </div>
+
+    <script>
+        const BACKEND_URL = 'https://script.google.com/macros/s/AKfycbyUvvuE7vBILSUPl-pWoRO95KAa5wJ6ln0E_tboRxqBE3xeYDnVNC4lNj00PXPu5-VH/exec';
+        const results = document.getElementById('results');
+
+        function log(title, message, type = 'info') {
+            const div = document.createElement('div');
+            div.className = `box ${type}`;
+            
+            let html = `<strong>${title}</strong>`;
+            if (message) {
+                if (typeof message === 'string') {
+                    html += `<div style="margin-top: 8px;">${message}</div>`;
+                } else {
+                    html += `<pre>${JSON.stringify(message, null, 2)}</pre>`;
+                }
+            }
+            div.innerHTML = html;
+            results.appendChild(div);
+            console.log(`[${type}] ${title}:`, message);
+        }
+
+        async function testCORS() {
+            log('🔍 Iniciando teste', `Origin: ${window.location.origin}\nBackend: ${BACKEND_URL}`, 'info');
+
+            try {
+                // Teste 1: POST simples SEM preflight (headers simples)
+                log('1️⃣ POST Simples (sem preflight)', 'Enviando payload minimal...', 'info');
+                
+                const payload = { 
+                    action: 'test', 
+                    data: 'CORS test from GitHub Pages - ' + new Date().toISOString()
+                };
+                
+                const postResponse = await fetch(BACKEND_URL, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded'  // Header "simples" - não dispara preflight
+                    },
+                    body: 'payload=' + encodeURIComponent(JSON.stringify(payload))
+                });
+
+                log('✅ Request enviado', `Status: ${postResponse.status} ${postResponse.statusText}`, 'ok');
+
+                // Teste 2: Listar todos os headers
+                let allHeaders = {};
+                for (const [key, value] of postResponse.headers) {
+                    allHeaders[key] = value;
+                }
+                
+                log('📋 Todos os Headers da Resposta', allHeaders, 'info');
+
+                // Teste 3: Procurar CORS
+                const corsOrigin = postResponse.headers.get('access-control-allow-origin');
+                const corsMethods = postResponse.headers.get('access-control-allow-methods');
+                const corsHeaders = postResponse.headers.get('access-control-allow-headers');
+                
+                if (corsOrigin) {
+                    log('✅ CORS Header Encontrado!', {
+                        'Access-Control-Allow-Origin': corsOrigin,
+                        'Access-Control-Allow-Methods': corsMethods || '(não presente)',
+                        'Access-Control-Allow-Headers': corsHeaders || '(não presente)'
+                    }, 'ok');
+                } else {
+                    log('⚠️ CORS Header NÃO encontrado', 
+                        'Os headers CORS não estão sendo retornados. Isso pode significar:\n' +
+                        '1. setHeader() não está funcionando em ContentService\n' +
+                        '2. GAS reimplementa a resposta e remove headers customizados\n' +
+                        '3. Precisa usar uma abordagem diferente (proxy ou JSONP)',
+                        'warning');
+                }
+
+                // Teste 4: Response Body
+                const responseText = await postResponse.text();
+                log('📄 Response Body', responseText, 'info');
+
+                try {
+                    const json = JSON.parse(responseText);
+                    log('✅ Response é JSON válido', json, 'ok');
+                } catch (e) {
+                    log('⚠️ Response não é JSON', responseText.substring(0, 300), 'warning');
+                }
+
+                // Teste 5: Resultado final
+                if (postResponse.status === 200) {
+                    log('🎉 POST Funcionou!', 
+                        'A comunicação básica com o GAS está funcionando.\n\n' +
+                        (corsOrigin ? 'CORS headers estão presentes!' : 'Mas CORS headers faltam. Veja soluções abaixo.'),
+                        corsOrigin ? 'success' : 'warning');
+                }
+
+            } catch (error) {
+                log('❌ Erro CORS ou Rede', `${error.message}\n\nStack: ${error.stack}`, 'error');
+            }
+        }
+
+        // Executar ao carregar
+        setTimeout(testCORS, 500);
+    </script>
+</body>
+</html>

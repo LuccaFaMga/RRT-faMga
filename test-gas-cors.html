@@ -37,7 +37,7 @@
                 const response = await fetch(BACKEND_URL, {
                     method: 'POST',
                     headers: {
-                        'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8'
+                        'Content-Type': 'application/x-www-form-urlencoded'
                     },
                     body: 'payload=' + encodeURIComponent(JSON.stringify(payload))
                 });

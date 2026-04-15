@@ -62,6 +62,44 @@ function logFlowMain(id, etapa, obj) {
 }
 
 /* ============================================================
+ *   🧭 REQUEST HANDLER: processRequestPayload(payload)
+ * ============================================================ */
+function processRequestPayload(payload) {
+    let response;
+
+    try {
+        const action = payload.action || "processar_revisao";
+
+        switch (action) {
+            case "processar_revisao": response = processarRRT_Web(payload); break;
+            case "supervisor_update": response = handleSupervisorUpdate(payload); break;
+            case "supervisor_decision": response = handleSupervisorDecision(payload); break;
+            case "runFunction": response = runBackendFunction(payload); break;
+
+            case "handleWithdrawal": response = handleWithdrawal(payload); break;
+            case "getRollsByStatus": response = getRollsByStatus_Web(payload); break;
+            case "processSupervisorDecision": response = processSupervisorDecision_Web(payload); break;
+            case "generateRevisionPDF": response = generateRevisionPDF_Web(payload.idRolo); break;
+            case "processarDecisaoCompras": response = processarDecisaoComprasV2_Web(payload); break;
+            case "stock_create":
+            case "stock_update":
+            case "stock_delete":
+                response = handleStockAction(payload); break;
+            case "initialize_roll":
+                response = initializeRollAndGetId(payload.revisorNome, payload.qrData || null); break;
+            case "upload_photo":
+                response = uploadDefectPhoto(payload); break;
+            default:
+                throw new Error(`Ação desconhecida: ${action}`);
+        }
+    } catch (err) {
+        response = { status: "FALHA", message: err.message };
+    }
+
+    return response;
+}
+
+/* ============================================================
  *   🧭 WEB APP ROUTER: doGet(e) — COM LOGS DETALHADOS (FIXED)
  * ============================================================ */
 function doGet(e) {
@@ -73,6 +111,23 @@ function doGet(e) {
 
         const p = e && e.parameter ? e.parameter : {};
         Logger.log(`[DOGET][${traceId}] PARAMS: ${JSON.stringify(p)}`);
+
+        // JSONP API fallback para evitar CORS em UI estática
+        if (p.callback && p.payload) {
+            const callbackName = String(p.callback).replace(/[^a-zA-Z0-9_$]/g, '_') || 'callback';
+            let response;
+            try {
+                const payload = JSON.parse(p.payload);
+                response = processRequestPayload(payload);
+            } catch (err) {
+                response = { status: 'FALHA', message: `Payload inválido: ${err.message}` };
+            }
+
+            const js = `${callbackName}(${JSON.stringify(response)});`;
+            return ContentService
+                .createTextOutput(js)
+                .setMimeType(ContentService.MimeType.JAVASCRIPT);
+        }
 
         const page = p.page || "index";
         Logger.log(`[DOGET][${traceId}] PAGE RESOLVED: "${page}"`);
@@ -137,23 +192,18 @@ function doGet(e) {
             .setTitle(`RRT - ${page.charAt(0).toUpperCase() + page.slice(1)}`);
 
         Logger.log(`[DOGET][${traceId}] END OK`);
-        return output
-            .addHeader('Access-Control-Allow-Origin', '*')
-            .addHeader('Access-Control-Allow-Methods', 'GET,HEAD,OPTIONS,POST,PUT,DELETE')
-            .addHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization');
+        return output;
 
     } catch (err) {
         Logger.log(`[DOGET][${traceId}] ❌ ERROR: ${err.message}`);
         Logger.log(err.stack);
 
-        return HtmlService.createHtmlOutput(`
+        const errorOutput = HtmlService.createHtmlOutput(`
             <h3>Erro crítico no carregamento</h3>
             <p><strong>${err.message}</strong></p>
             <pre style="white-space:pre-wrap">${err.stack || ""}</pre>
-        `)
-            .addHeader('Access-Control-Allow-Origin', '*')
-            .addHeader('Access-Control-Allow-Methods', 'GET,HEAD,OPTIONS,POST,PUT,DELETE')
-            .addHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization');
+        `);
+        return errorOutput;
     }
 }
 
@@ -172,58 +222,21 @@ function doPost(e) {
         } else {
             throw new Error('Corpo da requisição inválido');
         }
-        const action = payload.action || "processar_revisao";
 
-        try { logFlowMain(payload.id_do_rolo || payload.id || '-', 'DOPOST_START', { action: action, payload: payload }); } catch (e) { }
-
-        switch (action) {
-            case "processar_revisao": response = processarRRT_Web(payload); break;
-            case "supervisor_update": response = handleSupervisorUpdate(payload); break;
-            case "supervisor_decision": response = handleSupervisorDecision(payload); break;
-            case "runFunction": response = runBackendFunction(payload); break;
-
-            // Ações dos Controllers existentes
-            case "handleWithdrawal": response = handleWithdrawal(payload); break;
-            case "getRollsByStatus": response = getRollsByStatus_Web(payload); break;
-            case "processSupervisorDecision": response = processSupervisorDecision_Web(payload); break;
-            case "generateRevisionPDF": response = generateRevisionPDF_Web(payload.idRolo); break;
-            case "processarDecisaoCompras": response = processarDecisaoComprasV2_Web(payload); break;
-
-            case "stock_create":
-            case "stock_update":
-            case "stock_delete":
-                response = handleStockAction(payload); break;
-
-            case "initialize_roll":
-                response = initializeRollAndGetId(payload.revisorNome, payload.qrData || null); break;
-
-            case "upload_photo":
-                response = uploadDefectPhoto(payload); break;
-
-            default:
-                throw new Error(`Ação desconhecida: ${action}`);
-        }
+        response = processRequestPayload(payload);
     } catch (err) {
         response = { status: "FALHA", message: err.message };
     }
 
     return ContentService
         .createTextOutput(JSON.stringify(response))
-        .setMimeType(ContentService.MimeType.JSON)
-        .addHeader('Access-Control-Allow-Origin', '*')
-        .addHeader('Access-Control-Allow-Methods', 'GET,HEAD,OPTIONS,POST,PUT,DELETE')
-        .addHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization')
-        .addHeader('Access-Control-Max-Age', '86400');
+        .setMimeType(ContentService.MimeType.JSON);
 }
 
 function doOptions(e) {
     return ContentService
         .createTextOutput('')
-        .setMimeType(ContentService.MimeType.TEXT)
-        .addHeader('Access-Control-Allow-Origin', '*')
-        .addHeader('Access-Control-Allow-Methods', 'GET,HEAD,OPTIONS,POST,PUT,DELETE')
-        .addHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization')
-        .addHeader('Access-Control-Max-Age', '86400');
+        .setMimeType(ContentService.MimeType.TEXT);
 }
 
 function runBackendFunction(payload) {
