@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>🧪 Teste CORS Detalhado - GAS Backend</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: 'Segoe UI', -apple-system, sans-serif; 
+            padding: 20px; 
+            background: #f5f5f5;
+            line-height: 1.6;
+        }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { color: #333; margin-bottom: 20px; }
+        .box { 
+            background: white; 
+            border-left: 4px solid #ccc; 
+            padding: 15px; 
+            margin: 10px 0; 
+            border-radius: 4px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .box.info { border-left-color: #2196F3; background: #e3f2fd; }
+        .box.ok { border-left-color: #4CAF50; background: #e8f5e9; }
+        .box.error { border-left-color: #f44336; background: #ffebee; }
+        .box.warning { border-left-color: #ff9800; background: #fff3e0; }
+        code { 
+            background: #f1f1f1; 
+            padding: 2px 6px; 
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+        }
+        pre { 
+            background: #f1f1f1; 
+            padding: 10px; 
+            border-radius: 4px;
+            overflow-x: auto;
+            margin: 10px 0;
+        }
+        .spinner {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #2196F3;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .status-loading::before { content: ""; display: inline-block; width: 12px; height: 12px; border: 2px solid #2196F3; border-top: 2px solid transparent; border-radius: 50%; animation: spin 0.8s linear infinite; margin-right: 8px; }
+        .status-ok::before { content: "✅ "; }
+        .status-error::before { content: "❌ "; }
+        .status-warning::before { content: "⚠️ "; }
+        .header-dump { font-size: 12px; font-family: monospace; }
+        button { 
+            background: #2196F3; 
+            color: white; 
+            border: none; 
+            padding: 10px 20px; 
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            margin-top: 10px;
+        }
+        button:hover { background: #1976D2; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🧪 Teste CORS - GAS Backend</h1>
+        <div id="results"></div>
+        <button onclick="location.reload()">Executar Novamente</button>
+    </div>
+
+    <script>
+        const BACKEND_URL = 'https://script.google.com/macros/s/AKfycbyUvvuE7vBILSUPl-pWoRO95KAa5wJ6ln0E_tboRxqBE3xeYDnVNC4lNj00PXPu5-VH/exec';
+        const results = document.getElementById('results');
+
+        function log(title, message, type = 'info') {
+            const div = document.createElement('div');
+            div.className = `box ${type}`;
+            
+            let html = `<strong class="status-${type}">${title}</strong>`;
+            if (message) {
+                if (typeof message === 'string') {
+                    html += `<div>${message}</div>`;
+                } else {
+                    html += `<pre>${JSON.stringify(message, null, 2)}</pre>`;
+                }
+            }
+            div.innerHTML = html;
+            results.appendChild(div);
+            console.log(`[${type}] ${title}:`, message);
+        }
+
+        async function testCORS() {
+            log('🔍 Iniciando teste', `Origin: ${window.location.origin}`, 'info');
+            log('Backend URL', BACKEND_URL, 'info');
+            log('Status', '<span class="spinner"></span> Testando...', 'loading');
+
+            try {
+                // Teste 1: OPTIONS (preflight)
+                log('1️⃣ Teste Preflight (OPTIONS)', 'Enviando...', 'info');
+                const optionsResponse = await fetch(BACKEND_URL, { method: 'OPTIONS' }).catch(e => {
+                    throw new Error(`OPTIONS falhou: ${e.message}`);
+                });
+                
+                log('OPTIONS Response', {
+                    status: optionsResponse.status,
+                    statusText: optionsResponse.statusText,
+                    headers: {
+                        'content-type': optionsResponse.headers.get('content-type'),
+                        'access-control-allow-origin': optionsResponse.headers.get('access-control-allow-origin'),
+                        'access-control-allow-methods': optionsResponse.headers.get('access-control-allow-methods'),
+                        'access-control-allow-headers': optionsResponse.headers.get('access-control-allow-headers'),
+                    }
+                }, 'ok');
+
+                // Teste 2: POST com payload
+                log('2️⃣ Teste POST com Payload', 'Enviando...', 'info');
+                const payload = { 
+                    action: 'test', 
+                    timestamp: new Date().toISOString(),
+                    message: 'CORS test from GitHub Pages'
+                };
+                
+                const postResponse = await fetch(BACKEND_URL, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8'
+                    },
+                    body: 'payload=' + encodeURIComponent(JSON.stringify(payload))
+                });
+
+                log('POST Status', `${postResponse.status} ${postResponse.statusText}`, 
+                    postResponse.ok ? 'ok' : 'error');
+
+                // Teste 3: CORS Headers
+                const corsHeaders = {
+                    'access-control-allow-origin': postResponse.headers.get('access-control-allow-origin'),
+                    'access-control-allow-methods': postResponse.headers.get('access-control-allow-methods'),
+                    'access-control-allow-headers': postResponse.headers.get('access-control-allow-headers'),
+                    'access-control-max-age': postResponse.headers.get('access-control-max-age'),
+                };
+
+                if (corsHeaders['access-control-allow-origin']) {
+                    log('✅ CORS Headers Encontrados', corsHeaders, 'ok');
+                } else {
+                    log('❌ CORS Headers NÃO Encontrados', corsHeaders, 'error');
+                }
+
+                // Teste 4: Response Body
+                const responseText = await postResponse.text();
+                log('3️⃣ Response Body', responseText, 'info');
+
+                try {
+                    const json = JSON.parse(responseText);
+                    log('✅ JSON Válido', json, 'ok');
+                } catch (e) {
+                    log('⚠️ Response não é JSON', responseText.substring(0, 200), 'warning');
+                }
+
+                // Resultado final
+                if (corsHeaders['access-control-allow-origin'] && postResponse.status === 200) {
+                    log('🎉 CORS FUNCIONANDO!', 'Você pode fazer requisições do GitHub Pages para o GAS!', 'ok');
+                } else {
+                    log('⚠️ CORS pode ter problemas', 'Verifique os headers acima', 'warning');
+                }
+
+            } catch (error) {
+                log('❌ Erro durante teste', `${error.message}\n\nStack: ${error.stack}`, 'error');
+                log('💡 Dica', 'Se ainda vir "No Access-Control-Allow-Origin", o GAS precisa fazer novo deploy.', 'warning');
+            }
+        }
+
+        // Executar ao carregar
+        setTimeout(testCORS, 500);
+    </script>
+</body>
+</html>
