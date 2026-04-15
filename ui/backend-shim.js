@@ -9,7 +9,7 @@
  * 3) O shim cria um fallback para `google.script.run` quando não estiver disponível.
  */
 
-const BACKEND_API_URL = 'REPLACE_WITH_YOUR_APPS_SCRIPT_WEB_APP_URL';
+const BACKEND_API_URL = 'https://script.google.com/macros/s/AKfycbyUvvuE7vBILSUPl-pWoRO95KAa5wJ6ln0E_tboRxqBE3xeYDnVNC4lNj00PXPu5-VH/exec';
 
 function isGASRunAvailable() {
   return typeof google !== 'undefined' && google && google.script && google.script.run;
