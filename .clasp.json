@@ -14,5 +14,20 @@
     ".json"
   ],
   "filePushOrder": [],
-  "skipSubdirectories": false
+  "skipSubdirectories": false,
+  "ignorePatterns": [
+    "generate-icons.js",
+    "temp_extract.js",
+    "node_modules/**",
+    ".git/**",
+    "icons/**",
+    "ui/**",
+    "README.md",
+    ".gitignore",
+    "package.json",
+    "package-lock.json",
+    "manifest.json",
+    "service-worker.js",
+    "offline-manager.js"
+  ]
 }
