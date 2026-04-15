@@ -2,27 +2,27 @@
   "name": "FA Maringá - RRT",
   "short_name": "RRT",
   "description": "Sistema de Revisão de Rolos de Tecido - Controle de Qualidade Têxtil",
-  "start_url": "/",
-  "scope": "/",
+  "start_url": "./ui/index.html",
+  "scope": "./",
   "display": "standalone",
   "orientation": "portrait-primary",
   "theme_color": "#0b63ff",
   "background_color": "#ffffff",
   "icons": [
     {
-      "src": "/icons/icon-96x96.png",
+      "src": "./icons/icon-96x96.png",
       "sizes": "96x96",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/icons/icon-192x192.png",
+      "src": "./icons/icon-192x192.png",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "any maskable"
     },
     {
-      "src": "/icons/icon-512x512.png",
+      "src": "./icons/icon-512x512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any maskable"
@@ -31,7 +31,7 @@
   "categories": ["business", "productivity"],
   "screenshots": [
     {
-      "src": "/icons/icon-192x192.png",
+      "src": "./icons/icon-192x192.png",
       "sizes": "192x192",
       "type": "image/png",
       "form_factor": "narrow"
@@ -42,7 +42,7 @@
       "name": "Dashboard de Estoque",
       "short_name": "Estoque",
       "description": "Visualize o dashboard com gráficos e métricas de estoque em tempo real",
-      "url": "/ui/estoque.html",
+      "url": "./ui/estoque.html",
       "icons": [
         {
           "src": "/icons/icon-96x96.png",
@@ -55,7 +55,7 @@
       "name": "Revisor de Dados",
       "short_name": "Revisor",
       "description": "Revise e invalide registros com histórico completo",
-      "url": "/ui/reviewer.html",
+      "url": "./ui/reviewer.html",
       "icons": [
         {
           "src": "/icons/icon-96x96.png",
