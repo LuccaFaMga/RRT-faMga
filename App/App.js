@@ -203,19 +203,13 @@ function doPost(e) {
 
     return ContentService
         .createTextOutput(JSON.stringify(response))
-        .setMimeType(ContentService.MimeType.JSON)
-        .setHeader('Access-Control-Allow-Origin', '*')
-        .setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS')
-        .setHeader('Access-Control-Allow-Headers', 'Content-Type');
+        .setMimeType(ContentService.MimeType.JSON);
 }
 
 function doOptions(e) {
     return ContentService
         .createTextOutput('')
-        .setMimeType(ContentService.MimeType.TEXT)
-        .setHeader('Access-Control-Allow-Origin', '*')
-        .setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS')
-        .setHeader('Access-Control-Allow-Headers', 'Content-Type');
+        .setMimeType(ContentService.MimeType.TEXT);
 }
 
 function runBackendFunction(payload) {
