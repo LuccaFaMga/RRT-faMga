@@ -1,8 +1,7 @@
-scripts/generate-icons.js
-scripts/temp_extract.js
+scripts/**
 node_modules/**
 .git/**
-README.md
+*.md
 .gitignore
 package.json
 package-lock.json
@@ -12,4 +11,3 @@ offline-manager.js
 icons/**
 ui/**
 .vscode/**
-*.md

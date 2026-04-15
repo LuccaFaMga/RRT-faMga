@@ -137,7 +137,10 @@ function doGet(e) {
             .setTitle(`RRT - ${page.charAt(0).toUpperCase() + page.slice(1)}`);
 
         Logger.log(`[DOGET][${traceId}] END OK`);
-        return output;
+        return output
+            .addHeader('Access-Control-Allow-Origin', '*')
+            .addHeader('Access-Control-Allow-Methods', 'GET,HEAD,OPTIONS,POST,PUT,DELETE')
+            .addHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization');
 
     } catch (err) {
         Logger.log(`[DOGET][${traceId}] ❌ ERROR: ${err.message}`);
@@ -147,7 +150,10 @@ function doGet(e) {
             <h3>Erro crítico no carregamento</h3>
             <p><strong>${err.message}</strong></p>
             <pre style="white-space:pre-wrap">${err.stack || ""}</pre>
-        `);
+        `)
+            .addHeader('Access-Control-Allow-Origin', '*')
+            .addHeader('Access-Control-Allow-Methods', 'GET,HEAD,OPTIONS,POST,PUT,DELETE')
+            .addHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization');
     }
 }
 
@@ -203,13 +209,21 @@ function doPost(e) {
 
     return ContentService
         .createTextOutput(JSON.stringify(response))
-        .setMimeType(ContentService.MimeType.JSON);
+        .setMimeType(ContentService.MimeType.JSON)
+        .addHeader('Access-Control-Allow-Origin', '*')
+        .addHeader('Access-Control-Allow-Methods', 'GET,HEAD,OPTIONS,POST,PUT,DELETE')
+        .addHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+        .addHeader('Access-Control-Max-Age', '86400');
 }
 
 function doOptions(e) {
     return ContentService
         .createTextOutput('')
-        .setMimeType(ContentService.MimeType.TEXT);
+        .setMimeType(ContentService.MimeType.TEXT)
+        .addHeader('Access-Control-Allow-Origin', '*')
+        .addHeader('Access-Control-Allow-Methods', 'GET,HEAD,OPTIONS,POST,PUT,DELETE')
+        .addHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+        .addHeader('Access-Control-Max-Age', '86400');
 }
 
 function runBackendFunction(payload) {

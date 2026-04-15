@@ -4,13 +4,15 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>FA Maringá - RRT</title>
-  <meta http-equiv="refresh" content="0;url=/RRT-faMga/ui/index.html">
-  <link rel="canonical" href="/RRT-faMga/ui/index.html">
   <script>
-    window.location.replace('/RRT-faMga/ui/index.html');
+    // Redireciona dinamicamente para ui/index.html, mantendo a base correta
+    (function() {
+      const uiPath = new URL('ui/index.html', window.location.origin + window.location.pathname).href;
+      window.location.replace(uiPath);
+    })();
   </script>
 </head>
 <body>
-  <p>Redirecionando para <a href="/RRT-faMga/ui/index.html">FA Maringá RRT</a>...</p>
+  <p>Redirecionando...</p>
 </body>
 </html>

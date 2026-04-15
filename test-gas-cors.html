@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Teste GAS CORS</title>
+    <style>
+        body { font-family: monospace; padding: 20px; }
+        .box { border: 1px solid #ccc; padding: 10px; margin: 10px 0; }
+        .ok { background: #d4edda; }
+        .error { background: #f8d7da; }
+        .info { background: #d1ecf1; }
+    </style>
+</head>
+<body>
+    <h1>🔍 Teste GAS CORS</h1>
+    <div id="results"></div>
+
+    <script>
+        const BACKEND_URL = 'https://script.google.com/macros/s/AKfycbyUvvuE7vBILSUPl-pWoRO95KAa5wJ6ln0E_tboRxqBE3xeYDnVNC4lNj00PXPu5-VH/exec';
+        const results = document.getElementById('results');
+
+        function log(message, type = 'info') {
+            const div = document.createElement('div');
+            div.className = `box ${type}`;
+            div.textContent = message;
+            results.appendChild(div);
+            console.log(`[${type}] ${message}`);
+        }
+
+        async function testCORS() {
+            log('Iniciando teste de CORS...', 'info');
+
+            try {
+                // 1️⃣ Teste simples com fetch
+                log('1️⃣ Testando fetch simples para GAS...', 'info');
+                const payload = { test: 'CORS test', timestamp: new Date().toISOString() };
+                
+                const response = await fetch(BACKEND_URL, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8'
+                    },
+                    body: 'payload=' + encodeURIComponent(JSON.stringify(payload))
+                });
+
+                log(`✅ Request enviado! Status: ${response.status}`, 'info');
+                
+                // 2️⃣ Verificar headers CORS
+                const corsHeaders = {
+                    'access-control-allow-origin': response.headers.get('access-control-allow-origin'),
+                    'access-control-allow-methods': response.headers.get('access-control-allow-methods'),
+                    'access-control-allow-headers': response.headers.get('access-control-allow-headers')
+                };
+                
+                log(`CORS Headers:`, 'info');
+                log(JSON.stringify(corsHeaders, null, 2), 'info');
+
+                if (corsHeaders['access-control-allow-origin']) {
+                    log(`✅ CORS Header encontrado: ${corsHeaders['access-control-allow-origin']}`, 'ok');
+                } else {
+                    log(`⚠️ ⚠️ CORS Header NÃO encontrado! O GAS pode não ter CORS configurado.`, 'error');
+                }
+
+                // 3️⃣ Tentar parsear resposta
+                const responseText = await response.text();
+                log(`Resposta do servidor (${responseText.length} chars): ${responseText.substring(0, 100)}...`, 'info');
+
+                try {
+                    const json = JSON.parse(responseText);
+                    log(`✅ Resposta JSON válida:`, 'ok');
+                    log(JSON.stringify(json, null, 2), 'ok');
+                } catch (e) {
+                    log(`⚠️ Resposta não é JSON válido. Erro: ${e.message}`, 'error');
+                }
+
+            } catch (error) {
+                log(`❌ ERRO: ${error.message}`, 'error');
+                log(`Stack: ${error.stack}`, 'error');
+            }
+        }
+
+        // Execute ao carregar
+        testCORS();
+    </script>
+</body>
+</html>
