@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>🧪 Teste JSONP Fallback - GAS Backend</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', -apple-system, sans-serif;
+            padding: 20px;
+            background: #f5f5f5;
+            line-height: 1.6;
+        }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { color: #333; margin-bottom: 20px; }
+        .box {
+            background: white;
+            border-left: 4px solid #ccc;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 4px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .box.info { border-left-color: #2196F3; background: #e3f2fd; }
+        .box.ok { border-left-color: #4CAF50; background: #e8f5e9; }
+        .box.error { border-left-color: #f44336; background: #ffebee; }
+        .box.warning { border-left-color: #ff9800; background: #fff3e0; }
+        .box.success { border-left-color: #4CAF50; background: #c8e6c9; font-weight: bold; }
+        code {
+            background: #f1f1f1;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+        }
+        pre {
+            background: #f1f1f1;
+            padding: 10px;
+            border-radius: 4px;
+            overflow-x: auto;
+            margin: 10px 0;
+            font-size: 12px;
+        }
+        button {
+            background: #2196F3;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            margin-top: 10px;
+        }
+        button:hover { background: #1976D2; }
+        .status-ok { color: #2e7d32; font-weight: bold; }
+        .status-error { color: #c62828; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🧪 Teste JSONP Fallback - GAS Backend</h1>
+        <p><em>Testando o fallback JSONP que contorna CORS no GAS</em></p>
+        <div id="results"></div>
+        <button onclick="location.reload()">Executar Novamente</button>
+    </div>
+
+    <script>
+        const BACKEND_URL = 'https://script.google.com/macros/s/AKfycbyUvvuE7vBILSUPl-pWoRO95KAa5wJ6ln0E_tboRxqBE3xeYDnVNC4lNj00PXPu5-VH/exec';
+        const results = document.getElementById('results');
+
+        function log(title, message, type = 'info') {
+            const div = document.createElement('div');
+            div.className = `box ${type}`;
+
+            let html = `<strong>${title}</strong>`;
+            if (message) {
+                if (typeof message === 'string') {
+                    html += `<div style="margin-top: 8px;">${message}</div>`;
+                } else {
+                    html += `<pre>${JSON.stringify(message, null, 2)}</pre>`;
+                }
+            }
+            div.innerHTML = html;
+            results.appendChild(div);
+            console.log(`[${type}] ${title}:`, message);
+        }
+
+        async function testJSONP() {
+            log('🔍 Iniciando teste JSONP', `Origin: ${window.location.origin}\nBackend: ${BACKEND_URL}`, 'info');
+
+            try {
+                // Teste 1: JSONP direto
+                log('1️⃣ JSONP Simples', 'Testando chamada JSONP básica...', 'info');
+
+                const payload = {
+                    action: 'runFunction',
+                    functionName: 'ping',
+                    args: []
+                };
+
+                const result = await callBackendFunctionJSONP(payload);
+                log('✅ JSONP Funcionou!', result, 'ok');
+
+                // Teste 2: JSONP com função real
+                log('2️⃣ JSONP com Função Real', 'Testando função que existe...', 'info');
+
+                const payload2 = {
+                    action: 'runFunction',
+                    functionName: 'getKPIDashboardData',
+                    args: []
+                };
+
+                try {
+                    const result2 = await callBackendFunctionJSONP(payload2);
+                    log('✅ Função Real Funcionou!', result2, 'ok');
+                } catch (err) {
+                    log('⚠️ Função Real Falhou', `Erro esperado: ${err.message}`, 'warning');
+                }
+
+                // Teste 3: Comparação com fetch (deve falhar)
+                log('3️⃣ Comparação com Fetch', 'Tentando fetch (deve falhar por CORS)...', 'info');
+
+                try {
+                    const fetchResult = await callBackendFunctionFetch(payload);
+                    log('⚠️ Fetch Funcionou?', fetchResult, 'warning');
+                } catch (fetchError) {
+                    log('✅ Fetch Falhou (esperado)', `CORS bloqueado: ${fetchError.message}`, 'ok');
+                }
+
+                // Resultado final
+                log('🎉 JSONP FUNCIONANDO!', 'O fallback JSONP está funcionando corretamente. Isso significa que o backend-shim.js deve funcionar na sua app!', 'success');
+
+            } catch (error) {
+                log('❌ Erro JSONP', `${error.message}\n\nStack: ${error.stack}`, 'error');
+            }
+        }
+
+        // Funções do backend-shim.js
+        async function callBackendFunctionFetch(payload) {
+            const body = 'payload=' + encodeURIComponent(JSON.stringify(payload));
+            const response = await fetch(BACKEND_URL, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded'
+                },
+                body
+            });
+
+            if (!response.ok) {
+                throw new Error(`Backend HTTP error: ${response.status}`);
+            }
+
+            const data = await response.json();
+
+            if (data && data.status === 'FALHA') {
+                throw new Error(data.message || 'Erro no backend');
+            }
+
+            return data;
+        }
+
+        function callBackendFunctionJSONP(payload) {
+            return new Promise((resolve, reject) => {
+                const callbackName = `__gas_jsonp_cb_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+                const url = `${BACKEND_URL}?callback=${encodeURIComponent(callbackName)}&payload=${encodeURIComponent(JSON.stringify(payload))}`;
+                const script = document.createElement('script');
+                let timeoutId;
+
+                function cleanup() {
+                    if (timeoutId) clearTimeout(timeoutId);
+                    delete window[callbackName];
+                    if (script.parentNode) script.parentNode.removeChild(script);
+                }
+
+                window[callbackName] = function(result) {
+                    cleanup();
+                    if (result && result.status === 'FALHA') {
+                        reject(new Error(result.message || 'Erro no backend'));
+                    } else {
+                        resolve(result);
+                    }
+                };
+
+                script.onerror = function() {
+                    cleanup();
+                    reject(new Error('JSONP load failed'));
+                };
+
+                timeoutId = setTimeout(() => {
+                    cleanup();
+                    reject(new Error('JSONP timeout'));
+                }, 10000);
+
+                script.src = url;
+                document.head.appendChild(script);
+            });
+        }
+
+        // Executar ao carregar
+        setTimeout(testJSONP, 500);
+    </script>
+</body>
+</html>
