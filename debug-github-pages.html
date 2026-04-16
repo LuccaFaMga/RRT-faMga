@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🔍 Debug GitHub Pages</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; background: #f5f5f5; }
+        .debug-box { background: white; padding: 15px; margin: 10px 0; border-radius: 8px; border-left: 4px solid #007cba; }
+        .error { border-left-color: #d32f2f; background: #ffebee; }
+        .success { border-left-color: #388e3c; background: #e8f5e9; }
+        .warning { border-left-color: #f57c00; background: #fff3e0; }
+        pre { background: #f8f9fa; padding: 10px; border-radius: 4px; overflow-x: auto; }
+        .test-btn { padding: 10px 20px; margin: 5px; background: #007cba; color: white; border: none; border-radius: 4px; cursor: pointer; }
+        .test-btn:hover { background: #005a9e; }
+    </style>
+</head>
+<body>
+    <h1>🔍 Debug GitHub Pages - RRT System</h1>
+    
+    <div class="debug-box">
+        <h3>📍 Informações da Página</h3>
+        <div id="page-info"></div>
+    </div>
+
+    <div class="debug-box">
+        <h3>📁 Estrutura de Arquivos</h3>
+        <div id="file-structure"></div>
+        <button class="test-btn" onclick="testFiles()">Testar Arquivos</button>
+    </div>
+
+    <div class="debug-box">
+        <h3>🌐 Teste de Redirecionamento</h3>
+        <div id="redirect-test"></div>
+        <button class="test-btn" onclick="testRedirect()">Testar Redirecionamento</button>
+    </div>
+
+    <div class="debug-box">
+        <h3>🔗 Teste de Backend</h3>
+        <div id="backend-test"></div>
+        <button class="test-btn" onclick="testBackend()">Testar Backend</button>
+    </div>
+
+    <div class="debug-box">
+        <h3>📱 PWA Features</h3>
+        <div id="pwa-test"></div>
+        <button class="test-btn" onclick="testPWA()">Testar PWA</button>
+    </div>
+
+    <script>
+        // Informações da página atual
+        function showPageInfo() {
+            const info = document.getElementById('page-info');
+            info.innerHTML = `
+                <p><strong>URL:</strong> ${window.location.href}</p>
+                <p><strong>Hostname:</strong> ${window.location.hostname}</p>
+                <p><strong>Pathname:</strong> ${window.location.pathname}</p>
+                <p><strong>Origin:</strong> ${window.location.origin}</p>
+                <p><strong>Protocol:</strong> ${window.location.protocol}</p>
+                <p><strong>User Agent:</strong> ${navigator.userAgent.substring(0, 100)}...</p>
+            `;
+        }
+
+        // Testar estrutura de arquivos
+        async function testFiles() {
+            const result = document.getElementById('file-structure');
+            const files = [
+                './index.html',
+                './ui/index.html',
+                './ui/estoque.html', 
+                './ui/reviewer.html',
+                './ui/backend-shim.js',
+                './ui/manifest.json',
+                './ui/service-worker.js',
+                './ui/icons/icon-192x192.png'
+            ];
+
+            let html = '';
+            for (const file of files) {
+                try {
+                    const response = await fetch(file, { method: 'HEAD' });
+                    const status = response.ok ? 
+                        '<span class="success">✅ ' + response.status + '</span>' : 
+                        '<span class="error">❌ ' + response.status + '</span>';
+                    html += `<p><strong>${file}:</strong> ${status}</p>`;
+                } catch (error) {
+                    html += `<p><strong>${file}:</strong> <span class="error">❌ Erro: ${error.message}</span></p>`;
+                }
+            }
+            result.innerHTML = html;
+        }
+
+        // Testar redirecionamento
+        function testRedirect() {
+            const result = document.getElementById('redirect-test');
+            result.innerHTML = `
+                <p><strong>Testando redirecionamento para:</strong> ./ui/index.html</p>
+                <p><strong>URL completa:</strong> ${new URL('./ui/index.html', window.location.href).href}</p>
+                <button class="test-btn" onclick="window.location.href='./ui/index.html'">Forçar Redirecionamento</button>
+            `;
+        }
+
+        // Testar backend
+        async function testBackend() {
+            const result = document.getElementById('backend-test');
+            const backendUrl = 'https://script.google.com/macros/s/AKfycbyUvvuE7vBILSUPl-pWoRO95KAa5wJ6ln0E_tboRxqBE3xeYDnVNC4lNj00PXPu5-VH/exec';
+            
+            try {
+                const payload = { test: 'debug', timestamp: new Date().toISOString() };
+                const response = await fetch(backendUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded'
+                    },
+                    body: 'payload=' + encodeURIComponent(JSON.stringify(payload))
+                });
+
+                const corsOrigin = response.headers.get('access-control-allow-origin');
+                const text = await response.text();
+
+                result.innerHTML = `
+                    <p><strong>Status:</strong> <span class="${response.ok ? 'success' : 'error'}">${response.status}</span></p>
+                    <p><strong>CORS Origin:</strong> <span class="${corsOrigin ? 'success' : 'warning'}">${corsOrigin || 'Não encontrado'}</span></p>
+                    <p><strong>Response:</strong></p>
+                    <pre>${text.substring(0, 200)}...</pre>
+                `;
+            } catch (error) {
+                result.innerHTML = `<p><span class="error">❌ Erro: ${error.message}</span></p>`;
+            }
+        }
+
+        // Testar PWA
+        async function testPWA() {
+            const result = document.getElementById('pwa-test');
+            
+            // Service Worker
+            const swRegistration = await navigator.serviceWorker.getRegistration();
+            const swStatus = swRegistration ? 
+                '<span class="success">✅ Registrado</span>' : 
+                '<span class="warning">⚠️ Não registrado</span>';
+
+            // Manifest
+            let manifestStatus = '❌ Não encontrado';
+            try {
+                const manifestResponse = await fetch('./ui/manifest.json');
+                if (manifestResponse.ok) {
+                    const manifest = await manifestResponse.json();
+                    manifestStatus = '<span class="success">✅ OK</span>';
+                }
+            } catch (error) {
+                manifestStatus = '<span class="error">❌ Erro</span>';
+            }
+
+            result.innerHTML = `
+                <p><strong>Service Worker:</strong> ${swStatus}</p>
+                <p><strong>Manifest:</strong> ${manifestStatus}</p>
+                <p><strong>PWA Install:</strong> ${'beforeinstallprompt' in window ? '<span class="success">✅ Suportado</span>' : '<span class="warning">⚠️ Limitado</span>'}</p>
+            `;
+        }
+
+        // Iniciar todos os testes
+        window.onload = function() {
+            showPageInfo();
+            testFiles();
+            testRedirect();
+            testBackend();
+            testPWA();
+        };
+    </script>
+</body>
+</html>
