@@ -98,16 +98,13 @@ function doGet(e) {
                 .setMimeType(ContentService.MimeType.JAVASCRIPT);
         }
 
-        const page = p.page || "index";
+        const page = p.page || "supervisor";
         Logger.log(`[DOGET][${traceId}] PAGE RESOLVED: "${page}"`);
 
         const appUrl = ScriptApp.getService().getUrl();
         let template;
 
         switch (page) {
-            case "index":
-                template = HtmlService.createTemplateFromFile("index");
-                break;
             case "supervisor":
                 template = handleSupervisorPage(p);
                 break;
@@ -123,7 +120,7 @@ function doGet(e) {
                 template = handleReviewerPage(p);
                 break;
             default:
-                template = handleReviewerPage(p);
+                return ContentService.createTextOutput("API endpoint - use POST para acessar funcionalidades").setMimeType(ContentService.MimeType.TEXT);
         }
 
         if (!template) {

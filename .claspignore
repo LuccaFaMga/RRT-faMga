@@ -11,3 +11,5 @@ offline-manager.js
 icons/**
 .vscode/**
 ui/**
+App-backup.js
+App-backup.gs
