@@ -140,7 +140,7 @@ function doGet(e) {
 
             case "index":
                 Logger.log(`[DOGET][${traceId}] ROUTE → index`);
-                template = HtmlService.createTemplateFromFile("ui/index");
+                template = HtmlService.createTemplateFromFile("index");
                 break;
 
             case "supervisor":

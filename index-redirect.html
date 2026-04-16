@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FA Maringá - RRT</title>
+  <script>
+    // Redireciona dinamicamente para ui/index.html, mantendo a base correta
+    (function() {
+      const uiPath = new URL('ui/index.html', window.location.origin + window.location.pathname).href;
+      window.location.replace(uiPath);
+    })();
+  </script>
+</head>
+<body>
+  <p>Redirecionando...</p>
+</body>
+</html>
