@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Teste CORS Imediato</title>
+</head>
+<body>
+    <h1>Teste CORS Direto</h1>
+    <div id="result"></div>
+    
+    <script>
+        async function testCORS() {
+            const url = 'https://script.google.com/macros/s/AKfycbyUvvuE7vBILSUPl-pWoRO95KAa5wJ6ln0E_tboRxqBE3xeYDnVNC4lNj00PXPu5-VH/exec';
+            
+            try {
+                // Teste OPTIONS (preflight)
+                console.log('Testando OPTIONS...');
+                const optionsResponse = await fetch(url, { method: 'OPTIONS' });
+                console.log('OPTIONS Response Headers:', [...optionsResponse.headers.entries()]);
+                
+                // Teste POST
+                console.log('Testando POST...');
+                const postResponse = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ test: 'cors', timestamp: Date.now() })
+                });
+                console.log('POST Response Headers:', [...postResponse.headers.entries()]);
+                
+                const data = await postResponse.text();
+                document.getElementById('result').innerHTML = `
+                    <h3>✅ SUCESSO!</h3>
+                    <p><strong>OPTIONS Status:</strong> ${optionsResponse.status}</p>
+                    <p><strong>POST Status:</strong> ${postResponse.status}</p>
+                    <p><strong>CORS Origin:</strong> ${postResponse.headers.get('access-control-allow-origin') || 'NÃO ENCONTRADO'}</p>
+                    <p><strong>Response:</strong></p>
+                    <pre>${data}</pre>
+                `;
+            } catch (error) {
+                console.error('Erro:', error);
+                document.getElementById('result').innerHTML = `
+                    <h3>❌ ERRO CORS</h3>
+                    <p><strong>Erro:</strong> ${error.message}</p>
+                    <p><strong>URL:</strong> ${url}</p>
+                `;
+            }
+        }
+        
+        testCORS();
+    </script>
+</body>
+</html>
