@@ -11,6 +11,21 @@
 
 const BACKEND_API_URL = 'https://script.google.com/macros/s/AKfycbyUvvuE7vBILSUPl-pWoRO95KAa5wJ6ln0E_tboRxqBE3xeYDnVNC4lNj00PXPu5-VH/exec';
 
+const allowedFunctions = {
+        processarRRT_Web,
+        getKPIDashboardData,
+        getRollsByStatus_Web,
+        getComprasCases_Web,
+        getSolicitacoesCorte_Web,
+        getReviewerMetrics_Web,
+        processarDecisaoComprasV2_Web,
+        atualizarPendenciaCompras_Web,
+        sendProactiveNotifications_Web,
+        registrarSolicitacaoCorte_Web,
+        getFotosByRevisionId_Web,
+        getImageAsBase64_Web
+    };
+
 function isGASRunAvailable() {
   return typeof google !== 'undefined' && google && google.script && google.script.run;
 }
@@ -137,21 +152,6 @@ function callBackendFunctionJSONP(payload) {
     document.head.appendChild(script);
   });
 }
-
-const allowedFunctions = {
-        processarRRT_Web,
-        getKPIDashboardData,
-        getRollsByStatus_Web,
-        getComprasCases_Web,
-        getSolicitacoesCorte_Web,
-        getReviewerMetrics_Web,
-        processarDecisaoComprasV2_Web,
-        atualizarPendenciaCompras_Web,
-        sendProactiveNotifications_Web,
-        registrarSolicitacaoCorte_Web,
-        getFotosByRevisionId_Web,
-        getImageAsBase64_Web
-    };
 
 if (!isGASRunAvailable()) {
   window.google = window.google || {};
