@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Teste CORS Simplificado</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        .result { margin: 10px 0; padding: 10px; border-radius: 5px; }
+        .success { background: #d4edda; color: #155724; }
+        .error { background: #f8d7da; color: #721c24; }
+        .info { background: #d1ecf1; color: #0c5460; }
+    </style>
+</head>
+<body>
+    <h1>🔍 Teste CORS do Backend GAS</h1>
+    <button onclick="testCORS()">Testar Conexão</button>
+    <div id="results"></div>
+
+    <script>
+        const BACKEND_URL = 'https://script.google.com/macros/s/AKfycbyUvvuE7vBILSUPl-pWoRO95KAa5wJ6ln0E_tboRxqBE3xeYDnVNC4lNj00PXPu5-VH/exec';
+        const results = document.getElementById('results');
+
+        function log(message, type = 'info') {
+            const div = document.createElement('div');
+            div.className = `result ${type}`;
+            div.innerHTML = message;
+            results.appendChild(div);
+            console.log(message);
+        }
+
+        async function testCORS() {
+            results.innerHTML = '';
+            log('🚀 Iniciando teste CORS...', 'info');
+
+            try {
+                const payload = { test: 'CORS', timestamp: new Date().toISOString() };
+                
+                const response = await fetch(BACKEND_URL, {
+                    method: 'POST',
+                    mode: 'cors',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                    },
+                    body: 'payload=' + encodeURIComponent(JSON.stringify(payload))
+                });
+
+                log(`✅ Status: ${response.status} ${response.statusText}`, 'success');
+                
+                const corsOrigin = response.headers.get('access-control-allow-origin');
+                if (corsOrigin) {
+                    log(`✅ CORS Origin: ${corsOrigin}`, 'success');
+                } else {
+                    log(`⚠️ Sem header CORS`, 'error');
+                }
+
+                const text = await response.text();
+                log(`📄 Resposta: ${text.substring(0, 200)}...`, 'info');
+
+            } catch (error) {
+                log(`❌ Erro: ${error.message}`, 'error');
+            }
+        }
+    </script>
+</body>
+</html>

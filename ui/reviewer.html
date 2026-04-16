@@ -6851,9 +6851,7 @@ const isAppsScriptHost = location.hostname.includes('script.googleusercontent.co
 if (!isAppsScriptHost && 'serviceWorker' in navigator) {
   window.addEventListener('load', async () => {
     try {
-      const registration = await navigator.serviceWorker.register('/service-worker.js', {
-        scope: '/'
-      });
+      const registration = await navigator.serviceWorker.register('../service-worker.js');
       console.log('[OFFLINE] ✅ Service Worker registered:', registration);
     } catch (error) {
       console.warn('[OFFLINE] ⚠️ Service Worker registration failed:', error);

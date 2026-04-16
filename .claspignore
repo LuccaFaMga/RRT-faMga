@@ -10,3 +10,4 @@ service-worker.js
 offline-manager.js
 icons/**
 .vscode/**
+ui/**
