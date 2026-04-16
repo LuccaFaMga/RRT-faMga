@@ -138,6 +138,21 @@ function callBackendFunctionJSONP(payload) {
   });
 }
 
+const allowedFunctions = {
+        processarRRT_Web,
+        getKPIDashboardData,
+        getRollsByStatus_Web,
+        getComprasCases_Web,
+        getSolicitacoesCorte_Web,
+        getReviewerMetrics_Web,
+        processarDecisaoComprasV2_Web,
+        atualizarPendenciaCompras_Web,
+        sendProactiveNotifications_Web,
+        registrarSolicitacaoCorte_Web,
+        getFotosByRevisionId_Web,
+        getImageAsBase64_Web
+    };
+
 if (!isGASRunAvailable()) {
   window.google = window.google || {};
   window.google.script = window.google.script || {};
