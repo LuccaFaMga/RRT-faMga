@@ -8,8 +8,11 @@
  * ----------------------------------------------------------- */
 function loadConfigFromProperties() {
     const props = PropertiesService.getScriptProperties();
-    
-    // Valores padrão (apenas para desenvolvimento - NÃO usar em produção)
+    // Uma única leitura de todas as propriedades (antes: uma leitura por chave, ~20x por execução)
+    const salvas = props.getProperties();
+
+    // Valores padrão (legado). Serão removidos do código na entrega 002;
+    // rode configurarPropriedades_() uma vez no editor para copiá-los às Script Properties.
     const defaults = {
         // Email
         EMAIL_COMPRAS: "quantumindchanel@gmail.com",
@@ -38,64 +41,90 @@ function loadConfigFromProperties() {
         
         // Settings
         LOG_EXTREMO: "true",
-        GENERATE_ID: "true",
-        SECRET_KEY: Utilities.getUuid() // Gera chave única por
+        GENERATE_ID: "true"
     };
-    
-    // Carrega de PropertiesService ou usa defaults
+
     const config = {};
     Object.keys(defaults).forEach(key => {
-        const value = props.getProperty(key);
-        config[key] = value !== null ? value : defaults[key];
+        config[key] = (salvas[key] !== undefined && salvas[key] !== null) ? salvas[key] : defaults[key];
     });
-    
+
+    // SECRET_KEY precisa ser estável entre execuções: antes, sem a propriedade, cada execução
+    // gerava um UUID novo e os links assinados do supervisor deixavam de validar.
+    config.SECRET_KEY = salvas.SECRET_KEY;
+    if (!config.SECRET_KEY) {
+        config.SECRET_KEY = Utilities.getUuid() + Utilities.getUuid();
+        props.setProperty("SECRET_KEY", config.SECRET_KEY);
+        Logger.log("[CONFIG] SECRET_KEY ausente: gerada e salva nas Script Properties.");
+    }
+
     // Converte strings para tipos apropriados
-    config.LOG_EXTREMO = config.LOG_EXTREMO === "true";
-    config.GENERATE_ID = config.GENERATE_ID === "true";
-    
+    config.LOG_EXTREMO = String(config.LOG_EXTREMO) === "true";
+    config.GENERATE_ID = String(config.GENERATE_ID) === "true";
+
     return config;
 }
 
+/**
+ * Rodar UMA VEZ pelo editor do Apps Script (Executar → configurarPropriedades_).
+ * Copia para as Script Properties os valores padrão que ainda não estiverem lá.
+ * Não sobrescreve nada que já exista. O sufixo "_" impede chamada pelo navegador.
+ */
+function configurarPropriedades_() {
+    const props = PropertiesService.getScriptProperties();
+    const salvas = props.getProperties();
+    const atuais = loadConfigFromProperties();
+    const novas = {};
+    Object.keys(atuais).forEach(key => {
+        if (salvas[key] === undefined) novas[key] = String(atuais[key]);
+    });
+    props.setProperties(novas, false);
+    Logger.log("[CONFIG] Propriedades criadas: " + (Object.keys(novas).join(", ") || "nenhuma"));
+}
+
+// Lida uma única vez por execução
+const CONFIG_LIDA_ = loadConfigFromProperties();
+
 const CONFIG_VALUES = {
     /* 2. LOGS */
-    LOG_EXTREMO: loadConfigFromProperties().LOG_EXTREMO,
+    LOG_EXTREMO: CONFIG_LIDA_.LOG_EXTREMO,
 
     /* 3. E-MAIL */
     EMAIL: {
-        COMPRAS: loadConfigFromProperties().EMAIL_COMPRAS,
-        ADMIN: loadConfigFromProperties().EMAIL_ADMIN,
-        SUPERVISOR: loadConfigFromProperties().EMAIL_SUPERVISOR,
-        SENDER_NAME: loadConfigFromProperties().SENDER_NAME
+        COMPRAS: CONFIG_LIDA_.EMAIL_COMPRAS,
+        ADMIN: CONFIG_LIDA_.EMAIL_ADMIN,
+        SUPERVISOR: CONFIG_LIDA_.EMAIL_SUPERVISOR,
+        SENDER_NAME: CONFIG_LIDA_.SENDER_NAME
     },
 
-    SUPERVISOR_NOME: loadConfigFromProperties().SUPERVISOR_NOME,
+    SUPERVISOR_NOME: CONFIG_LIDA_.SUPERVISOR_NOME,
 
     /* 4. URLs da WebApp */
     URL: {
-        SUPERVISOR_APP: loadConfigFromProperties().SUPERVISOR_APP_URL,
-        APPROVAL_FORM_BASE: loadConfigFromProperties().APPROVAL_FORM_BASE
+        SUPERVISOR_APP: CONFIG_LIDA_.SUPERVISOR_APP_URL,
+        APPROVAL_FORM_BASE: CONFIG_LIDA_.APPROVAL_FORM_BASE
     },
 
     /* 5. Arquivos / Drive */
     IDS: {
-        TEMPLATE_RELATORIO: loadConfigFromProperties().TEMPLATE_RELATORIO_ID,
-        TEMPLATE_FOTOS: loadConfigFromProperties().TEMPLATE_FOTOS_ID,
-        OUTPUT_FOLDER: loadConfigFromProperties().OUTPUT_FOLDER_ID,
+        TEMPLATE_RELATORIO: CONFIG_LIDA_.TEMPLATE_RELATORIO_ID,
+        TEMPLATE_FOTOS: CONFIG_LIDA_.TEMPLATE_FOTOS_ID,
+        OUTPUT_FOLDER: CONFIG_LIDA_.OUTPUT_FOLDER_ID,
         PASTA_PDFS: null, // alias, será definido abaixo
         PASTA_RRT: null, // alias, será definido abaixo
-        LOGO_FILE: loadConfigFromProperties().LOGO_FILE_ID,
-        SHEET_ID: loadConfigFromProperties().SHEET_ID
+        LOGO_FILE: CONFIG_LIDA_.LOGO_FILE_ID,
+        SHEET_ID: CONFIG_LIDA_.SHEET_ID
     },
 
     /* 6. Formulários */
     FORMS: {
-        ENTRY_ROLO: loadConfigFromProperties().FORM_ENTRY_ROLO,
-        ENTRY_SUP: loadConfigFromProperties().FORM_ENTRY_SUP,
-        ENTRY_DEC: loadConfigFromProperties().FORM_ENTRY_DEC
+        ENTRY_ROLO: CONFIG_LIDA_.FORM_ENTRY_ROLO,
+        ENTRY_SUP: CONFIG_LIDA_.FORM_ENTRY_SUP,
+        ENTRY_DEC: CONFIG_LIDA_.FORM_ENTRY_DEC
     },
 
-    GENERATE_ID: loadConfigFromProperties().GENERATE_ID,
-    SECRET_KEY: loadConfigFromProperties().SECRET_KEY
+    GENERATE_ID: CONFIG_LIDA_.GENERATE_ID,
+    SECRET_KEY: CONFIG_LIDA_.SECRET_KEY
 };
 
 /* -------------------------------------------------------------
