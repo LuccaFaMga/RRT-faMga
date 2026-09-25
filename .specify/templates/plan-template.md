@@ -10,7 +10,7 @@
 
 - **Plataforma:** Google Apps Script (V8) + HtmlService; cliente Chrome Android
 - **Armazenamento:** Google Sheets (abas em `specs/000-refatoracao/data-model.md`), Google Drive
-- **Testes:** `node --test tests/`
+- **Testes:** `npm test`
 - **Restrições:** [cotas, tamanho de página, tempo de resposta]
 
 ## Portão da Constituição

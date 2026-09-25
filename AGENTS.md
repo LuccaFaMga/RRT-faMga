@@ -100,12 +100,15 @@ descritos no plano da entrega.
 ## 7. Testes e verificação
 
 - Regras de negócio (`src/server/dominio/`) e a interpretação de etiqueta têm testes Node em `tests/`,
-  executados com `node --test tests/`.
+  executados com `npm test` (Node 22+).
+- `npm test` inclui `tests/colisao-globais.test.js`, que falha se surgir um nome global repetido entre
+  arquivos do servidor. `npm run globais` lista as repetições atuais.
 - Antes de alterar uma regra existente (pontuação, limites, interpretação do QR), escreva um **teste de
   caracterização** que prova o comportamento atual.
 - Mudanças de tela: roteiro manual no Samsung da operação, descrito em `tasks.md`.
-- Nunca faça `clasp push` para a implantação de produção. Use a implantação de **teste** apontando para a
-  planilha de teste. A publicação em produção é feita pelo Lucca.
+- Nunca faça `clasp push` com o `.clasp.json` (produção). Use o projeto de **teste**
+  (`clasp push -P .clasp.teste.json`), que aponta para a planilha de teste. A publicação em produção é feita
+  pelo Lucca.
 
 ## 8. Como se comportar
 

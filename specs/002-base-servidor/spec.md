@@ -6,7 +6,7 @@
 ## Contexto
 
 O servidor atual tem duas camadas de planilha (`DatabaseService`, `SheetsService`), duas implementações de
-PDF e de upload de foto, 13 funções globais duplicadas e um fluxo de 11 estados que grava cada transição
+PDF e de upload de foto, 5 funções globais definidas duas vezes e um fluxo de 11 estados que grava cada transição
 em 3–4 abas. Qualquer mudança exige mexer em vários arquivos e o risco de quebrar outra tela é alto.
 
 Esta entrega cria a base sobre a qual as telas 003–005 são construídas. Ela não muda nada que o usuário vê.
@@ -90,7 +90,7 @@ o critério apresentado ao fornecedor sem perceber.
 ## Critérios de sucesso
 
 - **CS-001**: `npm test` verde com testes de Fluxo, Pontuacao, Etiqueta, Planilha (com dublê).
-- **CS-002**: Na implantação de teste, um rolo percorre o fluxo inteiro pelas telas antigas usando o código
+- **CS-002**: No projeto de teste, um rolo percorre o fluxo inteiro pelas telas antigas usando o código
   novo por baixo.
 - **CS-003**: `DatabaseService.js`, `SheetsService.js`, `CoreService.js`, `DocumentService.js`,
   `WorkflowService.js`, `ValidationService.js` e `routers/` removidos ou reduzidos a adaptadores.

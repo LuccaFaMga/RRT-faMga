@@ -24,7 +24,7 @@ Formato: `- [ ] 001-Tx [P?] [Hn] descrição — arquivo — verificação`
 - [ ] 001-T10 [H2] Botão de foto aos 4 s + leitura da foto — mesmo arquivo — foto de etiqueta difícil é lida
 - [ ] 001-T11 [H3] Formulário de digitação (NF, produto, lote obrigatórios) — mesmo arquivo — validação impede avançar vazio
 - [ ] 001-T12 Fallback jsQR sob demanda + dica do Chrome — `leitorQr.html`, `jsqr.html` — no Samsung Internet a leitura funciona
-- [ ] 001-T13 Página de teste isolada `?p=teste-leitor` (só na implantação de teste) que mostra tempo de leitura — `src/server/main.js` provisório ou rota em `App.js` — tempo aparece na tela
+- [ ] 001-T13 Página de teste isolada `?p=teste-leitor` (só no projeto de teste) que mostra tempo de leitura — `src/server/main.js` provisório ou rota em `App.js` — tempo aparece na tela
 
 ## Etapa 4 — Integração com o legado
 

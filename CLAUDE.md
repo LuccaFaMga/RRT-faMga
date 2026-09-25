@@ -8,4 +8,5 @@ As instruções deste projeto estão em `AGENTS.md` (prompt de sistema compartil
 
 - Nova entrega: copie `.specify/templates/spec-template.md` para `specs/NNN-nome/spec.md` e preencha.
 - Antes de planejar, leia `.specify/memory/constitution.md` e `specs/000-refatoracao/plan.md`.
-- Rodar testes: `node --test tests/`
+- Rodar testes: `npm test`
+- Listar nomes globais repetidos: `npm run globais`

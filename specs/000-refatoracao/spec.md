@@ -17,7 +17,9 @@ O RRT é usado para auditar rolos de tecido com problema. Hoje:
 - A leitura do QR no Samsung **demora ou não acontece**. A etiqueta tem 12+ campos (fornecedor, NF, produto,
   lote, cor, padronagem, localização, medidas, composição) num QR de cerca de 1 cm, e o scanner processa até
   8 variações reduzidas de cada frame em vez de usar resolução.
-- O servidor tem **13 funções globais com nome duplicado** (ex.: `handleWithdrawal` ×3), duas camadas de
+- O servidor tem **5 funções globais definidas duas vezes** (ex.: `processSupervisorDecision` em `App.js` e
+  em `SupervisorRouter.js`, com comportamentos diferentes; `insertStructuredData` duas vezes no mesmo
+  arquivo), além de duas camadas de
   acesso à planilha, duas implementações de PDF e de upload de foto.
 - O fluxo tem **11 estados** e uma etapa de supervisor que foi pensada para quando **todos** os tecidos eram
   revisados. Hoje só entram tecidos com problema, então essa etapa virou atraso.

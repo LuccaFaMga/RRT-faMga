@@ -1,6 +1,6 @@
 # Constituição do RRT Tecidos
 
-**Versão:** 1.1.0 · **Ratificada em:** 2026-09-25 · **Última alteração:** 2026-09-25 · **Dono:** Lucca
+**Versão:** 1.1.1 · **Ratificada em:** 2026-09-25 · **Última alteração:** 2026-09-25 · **Dono:** Lucca
 
 Estes princípios valem para toda spec, plano e linha de código. Um plano que viole um artigo precisa
 declarar a exceção na seção *Portão da Constituição* com justificativa e aprovação do dono.
@@ -64,7 +64,7 @@ entram quando há pelo menos dois usos reais. Sem frameworks no cliente.
 
 ## Artigo X — Produção nunca para
 
-A refatoração acontece com o legado no ar. Código novo roda primeiro na implantação de teste com a planilha
+A refatoração acontece com o legado no ar. Código novo roda primeiro no projeto Apps Script de teste com a planilha
 de teste. A troca em produção é feita pelo dono, tela por tela, com a versão anterior guardada.
 
 ---
@@ -79,3 +79,4 @@ de teste. A troca em produção é feita pelo dono, tela por tela, com a versão
 |---|---|---|
 | 1.0.0 | 2026-09-25 | Versão inicial |
 | 1.1.0 | 2026-09-25 | Art. I: dois trabalhos (sem gerente). Art. III: áreas Revisão e Compras. Art. VIII: sem perfis, identificação por nome. Derivado das respostas do dono em `specs/000-refatoracao/spec.md` |
+| 1.1.1 | 2026-09-25 | Art. X: "implantação de teste" corrigido para "projeto Apps Script de teste" (Script Properties são por projeto). Sem mudança de princípio |

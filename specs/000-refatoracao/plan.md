@@ -27,8 +27,11 @@ finas.
 - **Plataforma:** Google Apps Script V8, HtmlService (modo IFRAME), `clasp` com `rootDir` na raiz
 - **Cliente:** Chrome Android (Samsung Galaxy). `BarcodeDetector` nativo; jsQR só como fallback
 - **Armazenamento:** Google Sheets (mesma planilha, abas existentes) + Drive (uma pasta por rolo)
-- **Testes:** Node 18+ `node --test tests/`, com dublês de `SpreadsheetApp`, `DriveApp`, `LockService`
-- **Ambientes:** implantação **teste** (planilha e pastas de teste via Script Properties) e **produção**
+- **Testes:** Node 22+ `npm test`, com dublês de `SpreadsheetApp`, `DriveApp`, `LockService`
+- **Ambientes:** dois **projetos** Apps Script. As Script Properties são do projeto, não da implantação, então
+  uma segunda implantação do mesmo projeto usaria a mesma planilha. O projeto **teste** é uma cópia com
+  `scriptId` próprio (`.clasp.teste.json`) e Properties apontando para a planilha/pasta de teste; o projeto
+  **produção** é o atual (`.clasp.json`).
 
 ## Portão da Constituição
 
@@ -43,7 +46,7 @@ finas.
 | VII — Teste antes de regra | ✅ | Testes de caracterização de Pontuacao e Etiqueta na 002 |
 | VIII — Segurança | ✅ | Properties, sem link público, conta Google obrigatória na 006; sem perfis (decisão do dono) |
 | IX — Simplicidade | ✅ | ~25.800 → 4.000–6.000 linhas |
-| X — Produção nunca para | ✅ | Adaptadores + implantação de teste + virada por tela |
+| X — Produção nunca para | ✅ | Adaptadores + projeto de teste separado + virada por tela |
 
 ## Arquitetura alvo
 
