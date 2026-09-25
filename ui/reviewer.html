@@ -348,12 +348,9 @@
     window.APP_BASE_URL = window.location.origin + window.location.pathname;
   </script>
 
-  <?!= include('ui/jsQR_js'); ?>
-  <?!= include('ui/zxing_js'); ?>
-  <?!= include('ui/reviewer_scanner_js'); ?>
+  <?!= include('src/client/comum/etiqueta'); ?>
+  <?!= include('src/client/comum/leitorQr'); ?>
   <?!= include('ui/reviewer_core_js'); ?>
-  <?!= include('offline-manager'); ?>
-  <?!= include('service-worker'); ?>
   
 </body>
 </html>

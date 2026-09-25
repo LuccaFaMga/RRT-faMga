@@ -115,6 +115,10 @@ function doGet(e) {
                 template = handleComprasPage(p);
                 break;
 
+            case "teste-leitor": // 001-leitor-qr: medição do leitor no celular (sem dados)
+                template = HtmlService.createTemplateFromFile("src/client/teste-leitor");
+                break;
+
             case "reviewer":
                 Logger.log(`[DOGET][${traceId}] ROUTE → reviewer`);
               template = handleReviewerPage(p, appUrl);
@@ -278,63 +282,6 @@ function handleReviewerPage(params, appUrl) {
         .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL)
         .setTitle("FA-RRT | Revisão de Tecidos");
     return output;
-}
-
-function getJsFileContent(filePath) {
-  const raw = HtmlService.createHtmlOutputFromFile(filePath).getContent();
-  const text = String(raw);
-  return text
-    .replace(/<script\b[^>]*>([\s\S]*?)<\/script>/gi, '$1')
-    .trim();
-}
-
-function handleReviewerScannerJs() {
-  const js = getJsFileContent("ui/reviewer_scanner_js");
-  return ContentService
-    .createTextOutput(js)
-    .setMimeType(ContentService.MimeType.JAVASCRIPT);
-}
-
-function handleReviewerCoreJs() {
-  const js = getJsFileContent("ui/reviewer_core_js");
-  return ContentService
-    .createTextOutput(js)
-    .setMimeType(ContentService.MimeType.JAVASCRIPT);
-}
-
-function handleReviewerLocalJs(params) {
-  const knownFiles = {
-    jsQR: "ui/jsQR_js",
-    zxing: "ui/zxing_js"
-  };
-
-  const requested = String(params && params.file || "").trim();
-  const filePath = knownFiles[requested];
-
-  if (!filePath) {
-    return ContentService
-      .createTextOutput(`console.error('Arquivo local de scanner não encontrado: ${requested}');`)
-      .setMimeType(ContentService.MimeType.JAVASCRIPT);
-  }
-
-  const content = getJsFileContent(filePath);
-  return ContentService
-    .createTextOutput(content)
-    .setMimeType(ContentService.MimeType.JAVASCRIPT);
-}
-
-function handleOfflineManagerJs() {
-  const js = HtmlService.createHtmlOutputFromFile("offline-manager").getContent();
-  return ContentService
-    .createTextOutput(js)
-    .setMimeType(ContentService.MimeType.JAVASCRIPT);
-}
-
-function handleReviewerCss() {
-  const css = HtmlService.createHtmlOutputFromFile("ui/reviewer_css_js").getContent();
-  return ContentService
-    .createTextOutput(css)
-    .setMimeType(ContentService.MimeType.TEXT);
 }
 
 function handleComprasPage(params) {
