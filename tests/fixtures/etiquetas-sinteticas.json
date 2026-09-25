@@ -1,0 +1,29 @@
+{
+  "_sobre": "Etiquetas montadas a partir dos formatos aceitos pelo legado. Substituir/complementar por etiquetas reais em tests/fixtures/etiquetas/ (000-T09).",
+  "casos": [
+    { "nome": "posicional 12 campos", "texto": "F01;Tecelagem X;12345;P100;L7;SP9;C3;XADREZ;R2-P3;150,5;1,60;100% ALGODAO" },
+    { "nome": "posicional composição com ;", "texto": "F01;Tecelagem X;12345;P100;L7;SP9;C3;LISO;R1;98;1,45;67% POLIESTER;33% VISCOSE" },
+    { "nome": "posicional com espaços e ; final", "texto": " F02 ; Malharia Y ; 998 ; P2 ; L1 ; SPX ; AZ ; LISO ; A1 ; 50 ; 1,8 ; 100% PES ; " },
+    { "nome": "posicional com pipe", "texto": "F03|Fornecedor Z|77|P3|L3|S3|VD|LISTRA|B2|120.25|1.5|ALGODAO" },
+    { "nome": "posicional por linhas", "texto": "F04\nForn W\n55\nP4\nL4\nS4\nPR\nPOA\nC3\n80\n1,6\nLINHO" },
+    { "nome": "posicional com 8 partes", "texto": "F05;Forn;1;P5;L5;S5;BR;LISO" },
+    { "nome": "posicional com 7 partes (inválido)", "texto": "F05;Forn;1;P5;L5;S5;BR" },
+    { "nome": "json objeto com chaves em inglês", "texto": "{\"supplier_id\":\"F06\",\"supplier_nm\":\"Tex\",\"nf\":\"10\",\"product_id\":\"P6\",\"lot\":\"L6\",\"meters_supplier\":\"100,5\",\"wid\":\"1,5\",\"comp\":\"ALG\"}" },
+    { "nome": "json objeto com aliases em português", "texto": "{\"Fornecedor ID\":\"F07\",\"Nome Fornecedor\":\"Tecidos Ã\",\"Nota Fiscal\":\"11\",\"Código Produto\":\"P7\",\"Lote\":\"L7\",\"Metragem\":\"99\",\"Largura\":\"160\",\"Composição\":\"PES\"}" },
+    { "nome": "json array 12 itens", "texto": "[\"F08\",\"Forn\",\"12\",\"P8\",\"L8\",\"S8\",\"C8\",\"LISO\",\"D1\",\"70\",\"1,4\",\"ALG\"]" },
+    { "nome": "json array curto", "texto": "[\"F08\",\"Forn\"]" },
+    { "nome": "json inválido", "texto": "{nf: 12, lote: 3" },
+    { "nome": "url com parâmetros", "texto": "https://exemplo.com/rolo?supplier_id=F09&fornecedor=Tex+Sul&nf=13&produto=P9&lote=L9&metros=45%2C5&largura=1.6" },
+    { "nome": "url com fragmento", "texto": "http://exemplo.com/?nf=14&lote=L10#topo" },
+    { "nome": "url sem parâmetros", "texto": "https://exemplo.com/rolo" },
+    { "nome": "chave=valor em linhas", "texto": "fornecedor=Tex Norte\nnf=15\nproduto=P11\nlote=L11\nmetragem=60\nlargura=1,55" },
+    { "nome": "chave: valor em linhas", "texto": "Fornecedor: Tex Leste\nNF: 16\nLote: L12\nCor: VERMELHO" },
+    { "nome": "chave=valor em linha única com ;", "texto": "nf=17;lote=L13;produto=P13;metros=33,3" },
+    { "nome": "chave:valor com pipe", "texto": "nf:18|lote:L14|cor:AZUL" },
+    { "nome": "caracteres invisíveis", "texto": "﻿​F10;Forn;19;P15;L15;S15;C15;LISO;E1;10;1,2;ALG" },
+    { "nome": "vazio", "texto": "" },
+    { "nome": "só espaços", "texto": "   " },
+    { "nome": "texto qualquer", "texto": "ROLO 123 SEM FORMATO" },
+    { "nome": "número solto", "texto": "7891234567890" }
+  ]
+}
