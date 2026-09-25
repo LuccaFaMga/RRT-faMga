@@ -1,0 +1,302 @@
+﻿<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FA Maringa - Supervisor</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --primary: #0b63ff; --primary-dark: #0052d9;
+            --secondary: #e02424; --success: #16a34a; --warning: #f59e0b;
+            --text: #1f2937; --text-secondary: #6b7280;
+            --bg: #ffffff; --bg-secondary: #f9fafb; --border: #e5e7eb;
+            --shadow-sm: 0 1px 2px 0 rgba(0,0,0,0.05);
+            --shadow-base: 0 4px 12px 0 rgba(0,0,0,0.08);
+            --radius: 12px; --radius-lg: 16px;
+            --transition: all 0.3s cubic-bezier(0.4,0,0.2,1);
+        }
+        body { font-family: 'Inter', sans-serif; background: var(--bg-secondary); color: var(--text); min-height: 100vh; display: flex; flex-direction: column; }
+        .header { background: var(--bg); padding: 1.25rem 2rem; box-shadow: var(--shadow-sm); display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); }
+        .header h1 { font-size: 1.3rem; font-weight: 700; color: var(--primary); display: flex; align-items: center; gap: 0.5rem; }
+        .header-user { font-size: 0.875rem; color: var(--text-secondary); }
+        .container { max-width: 860px; margin: 1.5rem auto; padding: 0 1rem; flex: 1; width: 100%; }
+        .card { background: var(--bg); border-radius: var(--radius-lg); padding: 1.75rem; box-shadow: var(--shadow-base); margin-bottom: 1.25rem; border: 1px solid var(--border); }
+        .card h2 { font-size: 1.1rem; font-weight: 600; margin-bottom: 1.25rem; color: var(--text); display: flex; align-items: center; gap: 0.5rem; }
+        .info-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0.75rem; margin-bottom: 1.5rem; }
+        .info-item { background: var(--bg-secondary); padding: 0.875rem 1rem; border-radius: var(--radius); border: 1px solid var(--border); }
+        .info-item label { display: block; font-size: 0.72rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase; letter-spacing: 0.4px; margin-bottom: 0.3rem; }
+        .info-item span { font-weight: 600; color: var(--text); font-size: 0.95rem; }
+        .btn { display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem; padding: 0.75rem 1.5rem; border-radius: var(--radius); font-weight: 600; font-size: 0.9rem; cursor: pointer; transition: var(--transition); border: none; font-family: 'Inter', sans-serif; min-width: 140px; }
+        .btn:disabled { opacity: 0.6; cursor: not-allowed; }
+        .btn-primary { background: var(--primary); color: white; }
+        .btn-primary:hover:not(:disabled) { background: var(--primary-dark); transform: translateY(-1px); }
+        .btn-success { background: var(--success); color: white; }
+        .btn-success:hover:not(:disabled) { background: #15803d; transform: translateY(-1px); }
+        .btn-danger { background: var(--secondary); color: white; }
+        .btn-danger:hover:not(:disabled) { background: #dc2626; transform: translateY(-1px); }
+        .btn-secondary { background: var(--bg-secondary); color: var(--text); border: 1px solid var(--border); }
+        .btn-secondary:hover:not(:disabled) { background: var(--border); }
+        .btn-group { display: flex; gap: 1rem; flex-wrap: wrap; margin-top: 1.25rem; }
+        textarea { width: 100%; border: 1px solid var(--border); border-radius: var(--radius); padding: 0.75rem 1rem; font-family: 'Inter', sans-serif; font-size: 0.9rem; color: var(--text); resize: vertical; min-height: 90px; background: var(--bg-secondary); }
+        textarea:focus { outline: none; border-color: var(--primary); background: white; }
+        .search-row { display: flex; gap: 0.75rem; }
+        input[type="text"] { flex: 1; padding: 0.75rem 1rem; border: 1px solid var(--border); border-radius: var(--radius); font-family: 'Inter', sans-serif; font-size: 0.9rem; color: var(--text); background: var(--bg-secondary); }
+        input[type="text"]:focus { outline: none; border-color: var(--primary); background: white; }
+        .alert { padding: 1rem 1.25rem; border-radius: var(--radius); margin-bottom: 1rem; display: flex; align-items: flex-start; gap: 0.75rem; font-size: 0.9rem; }
+        .alert-error   { background: #fee2e2; color: #991b1b; border: 1px solid #fecaca; }
+        .alert-success { background: #dcfce7; color: #166534; border: 1px solid #bbf7d0; }
+        .alert-warning { background: #fef3c7; color: #92400e; border: 1px solid #fde68a; }
+        .alert-info    { background: #e0f2fe; color: #0369a1; border: 1px solid #bae6fd; }
+        .alert i { margin-top: 2px; flex-shrink: 0; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .spinner-btn { animation: spin 0.8s linear infinite; }
+        .processing-overlay { display:none; position:fixed; inset:0; z-index:1000; background:rgba(15,23,42,0.72); align-items:center; justify-content:center; padding:1rem; }
+        .processing-overlay.active { display:flex; }
+        .processing-box { background:var(--bg); border-radius:var(--radius-lg); padding:2rem; width:min(360px,100%); text-align:center; box-shadow:0 20px 50px rgba(0,0,0,0.2); }
+        .processing-spinner { width:42px; height:42px; margin:0 auto 1rem; border:4px solid var(--border); border-top-color:var(--primary); border-radius:50%; animation:spin 0.8s linear infinite; }
+        .section-label { font-size: 0.8rem; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.5rem; }
+        #rejectPanel { display: none; margin-top: 1.25rem; padding: 1.25rem; background: #fff5f5; border: 1px solid #fecaca; border-radius: var(--radius); }
+        #rejectPanel .section-label { color: #991b1b; }
+        @media (max-width: 600px) { .container { padding: 0 0.75rem; margin-top: 1rem; } .btn-group { flex-direction: column; } .btn { width: 100%; } .search-row { flex-direction: column; } }
+    </style>
+</head>
+<body data-app-url="<?= APP_URL ?>">
+    <div class="header">
+        <h1><i class="fas fa-user-shield"></i> Supervisor</h1>
+        <div class="header-user"><i class="fas fa-user-circle"></i> <?= SUPERVISOR_NOME ?></div>
+    </div>
+    <div id="processingOverlay" class="processing-overlay" role="status" aria-live="polite" aria-hidden="true">
+        <div class="processing-box"><div class="processing-spinner"></div><strong>Processando reprovacao</strong><p style="margin-top:0.5rem;color:var(--text-secondary);font-size:0.85rem;">Gerando o PDF e encaminhando para Compras...</p></div>
+    </div>
+    <div class="container">
+        <? if (error) { ?>
+            <div class="alert alert-error"><i class="fas fa-exclamation-triangle"></i><div><strong>Erro:</strong> <?= error ?></div></div>
+        <? } ?>
+        <div id="feedbackBanner" style="display:none;"></div>
+
+        <? if (id_rolo && rollData) { ?>
+        <div class="card">
+            <h2><i class="fas fa-info-circle"></i> Informacoes do Rolo</h2>
+            <div class="info-grid">
+                <div class="info-item"><label>ID do Rolo</label><span><?= id_rolo ?></span></div>
+                <div class="info-item"><label>Status Atual</label><span><?= statusDoRolo ?></span></div>
+                <div class="info-item"><label>Status Supervisor</label><span><?= statusSupervisor || '&mdash;' ?></span></div>
+                <? if (rollData.fornecedor || rollData.FORNECEDOR) { ?><div class="info-item"><label>Fornecedor</label><span><?= rollData.fornecedor || rollData.FORNECEDOR ?></span></div><? } ?>
+                <? if (rollData.metros_revisado || rollData.METROS_REVISADO) { ?><div class="info-item"><label>Metros Revisados</label><span><?= rollData.metros_revisado || rollData.METROS_REVISADO ?> m</span></div><? } ?>
+                <? if (rollData.pontos_100m2 || rollData.PONTOS_100M2) { ?><div class="info-item"><label>Pontos/100m&sup2;</label><span><?= rollData.pontos_100m2 || rollData.PONTOS_100M2 ?></span></div><? } ?>
+            </div>
+            <? if (prefillDecision) { ?><div class="alert alert-info" style="margin-bottom:0;"><i class="fas fa-info-circle"></i><div>Decisao sugerida: <strong><?= prefillDecision ?></strong></div></div><? } ?>
+            <div style="margin-top: 1.5rem;">
+                <div class="section-label">Acao</div>
+                <div class="btn-group">
+                    <button class="btn btn-success" id="btnAprovar" onclick="approveRoll()"><i class="fas fa-check"></i> Aprovar Rolo</button>
+                    <button class="btn btn-danger" id="btnReprovar" onclick="showRejectPanel()"><i class="fas fa-times"></i> Reprovar Rolo</button>
+                </div>
+                <div id="rejectPanel">
+                    <div class="section-label">Motivo da Reprovacao</div>
+                    <textarea id="observacoes" placeholder="Descreva o motivo da reprovacao (obrigatorio)..." rows="3"></textarea>
+                    <div class="btn-group" style="margin-top:0.75rem;">
+                        <button class="btn btn-danger" id="btnConfirmarReprovacao" onclick="confirmReject()"><i class="fas fa-times-circle"></i> Confirmar Reprovacao</button>
+                        <button class="btn btn-secondary" onclick="hideRejectPanel()"><i class="fas fa-arrow-left"></i> Cancelar</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <? } else if (id_rolo && !rollData) { ?>
+        <div class="alert alert-error"><i class="fas fa-search"></i><div><strong>Rolo nao encontrado.</strong><br>O rolo <strong><?= id_rolo ?></strong> nao existe ou nao esta acessivel. Verifique o ID.</div></div>
+        <div class="card"><h2><i class="fas fa-search"></i> Buscar outro rolo</h2><div class="search-row"><input type="text" id="searchId" placeholder="Digite o ID do rolo" autofocus><button class="btn btn-primary" onclick="searchRoll()"><i class="fas fa-search"></i> Buscar</button></div></div>
+        <? } else { ?>
+        <div class="card">
+            <h2><i class="fas fa-search"></i> Localizar Rolo</h2>
+            <p style="color:var(--text-secondary);font-size:0.9rem;margin-bottom:1rem;">Digite o ID do rolo para registrar a decisao.</p>
+            <div class="search-row"><input type="text" id="searchId" placeholder="Ex: ROLO-AB12CD34" autofocus><button class="btn btn-primary" onclick="searchRoll()"><i class="fas fa-search"></i> Buscar</button></div>
+        </div>
+        <? } ?>
+    </div>
+
+    <script>
+        var ROLO_ID  = '<?= id_rolo ?>';
+        var SUP_NOME = '<?= SUPERVISOR_NOME ?>';
+        var APP_URL = document.body.getAttribute('data-app-url') || '';
+        var SUPERVISOR_QUEUE_KEY = 'fa-rrt-supervisor-queue';
+
+        function getSupervisorApiUrl() {
+            return String(APP_URL || '').replace(/\/$/, '');
+        }
+
+        function hasGoogleScriptRunner() {
+            return typeof google !== 'undefined' && google.script && typeof google.script.run === 'object';
+        }
+
+        function readSupervisorQueue() {
+            try {
+                var queue = JSON.parse(localStorage.getItem(SUPERVISOR_QUEUE_KEY) || '[]');
+                return Array.isArray(queue) ? queue : [];
+            } catch (e) {
+                console.warn('[SUPERVISOR] Fila local indisponivel:', e);
+                return [];
+            }
+        }
+
+        function queueSupervisorDecision(payload) {
+            try {
+                var queue = readSupervisorQueue();
+                queue.push({ payload: payload, createdAt: Date.now() });
+                localStorage.setItem(SUPERVISOR_QUEUE_KEY, JSON.stringify(queue));
+                return { status: 'PENDENTE', message: 'Decisao salva neste dispositivo e sera enviada quando a conexao voltar.', queued: true };
+            } catch (e) {
+                return Promise.reject(new Error('Nao foi possivel salvar a decisao offline neste dispositivo.'));
+            }
+        }
+
+        function callSupervisorDecision(payload) {
+            if (!navigator.onLine) {
+                return Promise.resolve(queueSupervisorDecision(payload));
+            }
+
+            if (hasGoogleScriptRunner()) {
+                return new Promise(function(resolve, reject) {
+                    google.script.run
+                        .withSuccessHandler(resolve)
+                        .withFailureHandler(reject)
+                        .processSupervisorDecision(payload);
+                });
+            }
+
+            var apiUrl = getSupervisorApiUrl();
+            if (!apiUrl) {
+                return Promise.reject(new Error('Servico indisponivel: abra esta pagina pelo Web App do Apps Script.'));
+            }
+
+            return fetch(apiUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'processSupervisorDecision', ...payload })
+            }).then(function(response) {
+                if (!response.ok) throw new Error('HTTP ' + response.status);
+                return response.json();
+            });
+        }
+
+        function syncSupervisorQueue() {
+            if (!navigator.onLine) return;
+            var queue = readSupervisorQueue();
+            if (!queue.length || !getSupervisorApiUrl()) return;
+
+            var item = queue[0];
+            callSupervisorDecision(item.payload).then(function(result) {
+                if (result && (result.status === 'SUCESSO' || result.status === 'OK')) {
+                    queue.shift();
+                    localStorage.setItem(SUPERVISOR_QUEUE_KEY, JSON.stringify(queue));
+                    showFeedback('success', 'Decisao pendente sincronizada com sucesso.');
+                    syncSupervisorQueue();
+                }
+            }).catch(function(error) {
+                console.warn('[SUPERVISOR] Sincronizacao adiada:', error);
+            });
+        }
+
+        function searchRoll() {
+            var id = (document.getElementById('searchId') || {}).value || '';
+            if (!id.trim()) { showFeedback('warning','Digite o ID do rolo antes de buscar.'); return; }
+            window.location.href = '?page=supervisor&id=' + encodeURIComponent(id.trim());
+        }
+
+        document.addEventListener('DOMContentLoaded', function() {
+            var si = document.getElementById('searchId');
+            if (si) si.addEventListener('keydown', function(e) { if (e.key === 'Enter') searchRoll(); });
+            window.addEventListener('online', syncSupervisorQueue);
+            syncSupervisorQueue();
+        });
+
+        function showRejectPanel() { document.getElementById('rejectPanel').style.display = 'block'; var o = document.getElementById('observacoes'); if (o) o.focus(); }
+        function hideRejectPanel() { document.getElementById('rejectPanel').style.display = 'none'; }
+
+        function approveRoll() {
+            setLoading(true, 'btnAprovar', 'btnReprovar');
+            callSupervisorDecision({ id_rolo: ROLO_ID, decision: 'APROVADO', supervisorName: SUP_NOME })
+                .then(function(r) {
+                    setLoading(false, 'btnAprovar', 'btnReprovar');
+                    if (r && r.queued) {
+                        showFeedback('warning', r.message);
+                        disableActions();
+                    } else if (r && (r.status === 'SUCESSO' || r.status === 'OK')) {
+                        showFeedback('success', 'Rolo aprovado com sucesso! Status: ' + (r.fase_atual || 'em_estoque'));
+                        disableActions();
+                    } else { showFeedback('error', (r && r.message) ? r.message : 'Erro desconhecido ao aprovar.'); }
+                })
+                .catch(function(e) {
+                    setLoading(false, 'btnAprovar', 'btnReprovar');
+                    showFeedback('error', 'Erro de comunicacao: ' + ((e && e.message) ? e.message : String(e)));
+                });
+        }
+
+        function confirmReject() {
+            var obs = ((document.getElementById('observacoes') || {}).value || '').trim();
+            if (!obs) { showFeedback('warning', 'Informe o motivo da reprovacao antes de confirmar.'); return; }
+            showProcessingOverlay(true);
+            setLoading(true, 'btnConfirmarReprovacao');
+            callSupervisorDecision({ id_rolo: ROLO_ID, decision: 'REPROVADO', supervisorName: SUP_NOME, observacoes: obs })
+                .then(function(r) {
+                    setLoading(false, 'btnConfirmarReprovacao');
+                    showProcessingOverlay(false);
+                    if (r && r.queued) {
+                        showFeedback('warning', r.message);
+                        disableActions(); hideRejectPanel();
+                    } else if (r && (r.status === 'SUCESSO' || r.status === 'OK')) {
+                        var emailStatus = r.email_compras_enviado === false
+                            ? ' O email para Compras nao foi enviado; verifique as configuracoes.'
+                            : ' Compras sera notificado por email.';
+                        showFeedback(r.email_compras_enviado === false ? 'warning' : 'success', 'Rolo reprovado. Status: ' + (r.fase_atual || 'enviado_compras') + emailStatus);
+                        disableActions(); hideRejectPanel();
+                    } else { showFeedback('error', (r && r.message) ? r.message : 'Erro ao reprovar.'); }
+                })
+                .catch(function(e) {
+                    setLoading(false, 'btnConfirmarReprovacao');
+                    showProcessingOverlay(false);
+                    showFeedback('error', 'Erro de comunicacao: ' + ((e && e.message) ? e.message : String(e)));
+                });
+        }
+
+        function showProcessingOverlay(active) {
+            var overlay = document.getElementById('processingOverlay');
+            if (!overlay) return;
+            overlay.classList.toggle('active', active);
+            overlay.setAttribute('aria-hidden', active ? 'false' : 'true');
+        }
+
+        function setLoading(loading) {
+            for (var i = 1; i < arguments.length; i++) {
+                var btn = document.getElementById(arguments[i]);
+                if (!btn) continue;
+                btn.disabled = loading;
+                var icon = btn.querySelector('i');
+                if (icon) {
+                    if (loading) { icon.dataset.orig = icon.className; icon.className = 'fas fa-spinner spinner-btn'; }
+                    else if (icon.dataset.orig) { icon.className = icon.dataset.orig; }
+                }
+            }
+        }
+
+        function disableActions() {
+            ['btnAprovar','btnReprovar','btnConfirmarReprovacao'].forEach(function(id) {
+                var b = document.getElementById(id); if (b) b.disabled = true;
+            });
+        }
+
+        function showFeedback(type, message) {
+            var b = document.getElementById('feedbackBanner');
+            if (!b) return;
+            var classes = { success:'alert-success', error:'alert-error', warning:'alert-warning', info:'alert-info' };
+            var icons   = { success:'fa-check-circle', error:'fa-exclamation-circle', warning:'fa-exclamation-triangle', info:'fa-info-circle' };
+            b.className = 'alert ' + (classes[type] || 'alert-info');
+            b.innerHTML = '<i class="fas ' + (icons[type] || 'fa-info-circle') + '"></i><div>' + message + '</div>';
+            b.style.display = 'flex';
+            b.scrollIntoView({ behavior:'smooth', block:'nearest' });
+        }
+    </script>
+</body>
+</html>

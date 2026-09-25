@@ -66,6 +66,13 @@ var DatabaseService = (function () {
         return Utilities.formatDate(new Date(), "America/Sao_Paulo", "yyyy-MM-dd HH:mm:ss");
     }
 
+    function formatDateBrazil(value) {
+        if (!value) return "";
+        const date = value instanceof Date ? value : new Date(value);
+        if (isNaN(date.getTime())) return String(value);
+        return Utilities.formatDate(date, "America/Sao_Paulo", "dd/MM/yyyy HH:mm:ss");
+    }
+
     function getSheetByName(sheetName) {
         dbLog(`[DB] getSheetByName chamada com: "${sheetName}"`);
         const ss = getSpreadsheet();
@@ -385,16 +392,29 @@ var DatabaseService = (function () {
     }
 
     function generateShortRevisionId(payload) {
-        const safe = (value, fallback) => {
-            const raw = String(value || "").trim();
-            if (!raw) return fallback;
-            return raw.replace(/\s+/g, "");
-        };
-
-        const supplierId = safe(payload?.supplier_id || payload?.fornecedor_id, "SUP");
-        const productId = safe(payload?.product_id || payload?.produto_id || payload?.ID_ROLO || payload?.id_do_rolo, "PROD");
-        const timeSuffix = Date.now().toString().slice(-5);
-        return supplierId + "-" + productId + "-" + timeSuffix;
+        // ✅ CORRIGIDO: Usa formato REV-00XX-YYYY padrão (2 dígitos)
+        const currentYear = new Date().getFullYear();
+        
+        // Busca contador do ano nas propriedades
+        const counterKey = `REVISION_COUNTER_${currentYear}`;
+        let counter = PropertiesService.getScriptProperties().getProperty(counterKey);
+        
+        if (!counter) {
+            // Se não existe contador, inicia em 40 (continuando após REV-0039-2026)
+            counter = 40;
+        } else {
+            // Se o contador atual for menor que 40, ajusta para 40
+            const currentCounter = parseInt(counter);
+            counter = currentCounter < 40 ? 40 : currentCounter + 1;
+        }
+        
+        // Salva o contador atualizado
+        PropertiesService.getScriptProperties().setProperty(counterKey, counter.toString());
+        
+        // Formata com 2 dígitos: REV-0040-2026
+        const sequence = String(counter).padStart(2, '0');
+        
+        return `REV-${sequence}-${currentYear}`;
     }
 
     function makeServiceResponse(success, data, error, metrics) {
@@ -471,13 +491,14 @@ var DatabaseService = (function () {
 
   const revIdx  = headers.indexOf("REVISION_ID");
   const roloIdx = headers.indexOf("ID_ROLO");
+    const produtoIdx = headers.indexOf("PRODUTO_ID");
 
   // 1) PRIORIDADE: se existir REVISION_ID igual, retorna imediatamente (exato)
   if (revIdx >= 0) {
     for (let i = data.length - 1; i >= 0; i--) { // tanto faz aqui, mas deixo reverso
       const row = data[i];
       const rowRevisionId = row[revIdx];
-      if (rowRevisionId === target) {
+    if (String(rowRevisionId || "").trim() === target) {
                 dbLog(`[DB] GET encontrado por REVISION_ID: ${target}`);
         return _rowToObject(row, headers, sheetName);
       }
@@ -489,12 +510,23 @@ var DatabaseService = (function () {
     for (let i = data.length - 1; i >= 0; i--) {
       const row = data[i];
       const rowRoloId = row[roloIdx];
-      if (rowRoloId === target) {
+    if (String(rowRoloId || "").trim() === target) {
                 dbLog(`[DB] GET encontrado por ID_ROLO (último): ${target}`);
         return _rowToObject(row, headers, sheetName);
       }
     }
   }
+
+    // O schema atual usa PRODUTO_ID como identificador físico do rolo.
+    if (produtoIdx >= 0) {
+        for (let i = data.length - 1; i >= 0; i--) {
+            const rowProdutoId = data[i][produtoIdx];
+            if (String(rowProdutoId || "").trim() === target) {
+                dbLog(`[DB] GET encontrado por PRODUTO_ID: ${target}`);
+                return _rowToObject(data[i], headers, sheetName);
+            }
+        }
+    }
 
     dbLog(`[DB] GET não encontrado: ${target}`);
   return null;
@@ -522,6 +554,7 @@ var DatabaseService = (function () {
 
     const revIdx  = headers.indexOf("REVISION_ID");
     const roloIdx = headers.indexOf("ID_ROLO");
+    const produtoIdx = headers.indexOf("PRODUTO_ID");
 
     let rowFound = null;
     let rowIndex = -1;
@@ -534,8 +567,9 @@ var DatabaseService = (function () {
       const row = data[i];
       const rowRevisionId = revIdx  >= 0 ? String(row[revIdx]  || "").trim() : "";
       const rowRoloId     = roloIdx >= 0 ? String(row[roloIdx] || "").trim() : "";
+    const rowProdutoId  = produtoIdx >= 0 ? String(row[produtoIdx] || "").trim() : "";
 
-      if (rowRevisionId === target || rowRoloId === target) {
+    if (rowRevisionId === target || rowRoloId === target || rowProdutoId === target) {
         rowFound = row;
         rowIndex = i;
         break;
@@ -606,13 +640,17 @@ var DatabaseService = (function () {
 
   const revisionIdIdx = headers.indexOf("REVISION_ID");
   const idDoRoloIdx   = headers.indexOf("ID_ROLO");
+    const produtoIdIdx  = headers.indexOf("PRODUTO_ID");
 
   for (let i = 0; i < data.length; i++) {
     const row = data[i];
     const rowRevisionId = revisionIdIdx >= 0 ? row[revisionIdIdx] : null;
     const rowRoloId     = idDoRoloIdx   >= 0 ? row[idDoRoloIdx]   : null;
+    const rowProdutoId  = produtoIdIdx  >= 0 ? row[produtoIdIdx]  : null;
 
-    if (rowRevisionId === docId || rowRoloId === docId) {
+    if (String(rowRevisionId || "").trim() === String(docId).trim() ||
+        String(rowRoloId || "").trim() === String(docId).trim() ||
+        String(rowProdutoId || "").trim() === String(docId).trim()) {
       sheet.deleteRow(i + 2);
             dbLog(`[DB] DELETE sucesso: ${docId}`);
       return { id: docId, status: "DELETED" };
@@ -901,7 +939,12 @@ function insertStructuredData(payload) {
         // ============================================================
         // 🆔 GERAÇÃO DO REVISION_ID (único e consistente)
         // ============================================================
-        const revisionId = generateShortRevisionId(rolo);
+        const revisionId = String(
+            rolo.revision_id ||
+            rolo.review_id ||
+            rolo.REVISION_ID ||
+            ""
+        ).trim() || generateShortRevisionId(rolo);
         dbLog(`[STRUCTURED] 🆔 Revision ID: ${revisionId}`);
         
         // ============================================================
@@ -1775,16 +1818,30 @@ function insertStructuredData(payload) {
 
     let nextPhase = "";
     let motivo = null;
+    const defeitosPayload = Array.isArray(payload.defeitos)
+      ? payload.defeitos
+      : (Array.isArray(rolo.defeitos) ? rolo.defeitos : []);
+    const metrosCalculo = rolo.metros_revisado || rolo.revised_meters || rolo.metros_fornecedor || rolo.wid || 0;
+    const decisionInput = Object.assign({}, rolo, {
+      defects: defeitosPayload,
+      defeitos: defeitosPayload,
+      metros_maquina: metrosCalculo,
+      comprimento_revisado: metrosCalculo,
+      largura_cm: rolo.largura_cm || rolo.len || 0
+    });
 
     // Regra: se mandou para análise, é supervisor (sem score)
-    if (statusForm === "aguardando_supervisor") {
+    if (!statusForm || !["aprovado_revisor", "aguardando_supervisor"].includes(statusForm)) {
+      nextPhase = "aguardando_supervisor";
+      motivo = "Status da revisao ausente ou invalido; enviado ao supervisor.";
+    } else if (statusForm === "aguardando_supervisor") {
       nextPhase = "aguardando_supervisor";
       motivo = "Encaminhado para análise do supervisor (decisão do revisor).";
     } else {
       // statusForm = aprovado_revisor -> precisa olhar score/decisão
       try {
         if (typeof calculateScoreAndDecision === "function") {
-          const scoreInfo = calculateScoreAndDecision(rolo);
+          const scoreInfo = calculateScoreAndDecision(decisionInput);
           nextPhase = String(scoreInfo?.nextPhase || "").trim().toLowerCase();
           motivo = scoreInfo?.motivo || null;
         }

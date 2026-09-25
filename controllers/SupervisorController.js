@@ -99,11 +99,7 @@ var SupervisorController = (function () {
    * FUNÇÃO PRINCIPAL
    * ========================================================== */
   function processDecision(payload) {
-    const lock = LockService.getScriptLock();
-
     try {
-      lock.waitLock(5000);
-
       if (!payload || typeof payload !== "object") {
         throw new Error("Payload inválido.");
       }
@@ -139,8 +135,17 @@ var SupervisorController = (function () {
       const repo = _getRepository();
 
       let result;
+      let emailComprasEnviado = null;
 
       try {
+        if (nextPhase === "reprovado_supervisor") {
+          DatabaseService.rolls.update(id, {
+            compras_status_case: 'pendente',
+            motivo_reprovacao_supervisor: payload.observacoes || ''
+          });
+          _track(id, "REJECTION_SENT_TO_COMPRAS", { motivo: payload.observacoes || '' });
+        }
+
         _track(id, "WORKFLOW_TRANSITION_ATTEMPT", {
           from: rolo.fase_atual,
           to: nextPhase
@@ -181,12 +186,8 @@ var SupervisorController = (function () {
         }
 
         if (nextPhase === "reprovado_supervisor") {
-          _track(id, "WORKFLOW_FALLBACK_COMPRAS", { usuario });
-          result = workflow.transition(id, "enviado_compras", {
-            usuario,
-            notas: "Fallback supervisor",
-            force: true
-          });
+          _track(id, "REJECTION_FLOW_FAILED", { error: e.message });
+          return { status: "FALHA", id, message: e.message };
         }
       }
 
@@ -211,13 +212,37 @@ var SupervisorController = (function () {
 
         if (faseFinal === "enviado_compras" && typeof sendComprasEmail === "function") {
           _track(id, "EMAIL_COMPRAS_ATTEMPT");
-          const linkAcompanhamento =
-            (typeof CONFIG !== 'undefined' && CONFIG.URL?.GARANTIA_APP)
-              ? `${CONFIG.URL.GARANTIA_APP}?action=garantia&idRolo=${encodeURIComponent(id)}`
-              : null;
+          // Busca defeitos do rolo para o email
+          const defeitosRaw = roloAtualizado.defeitos || roloAtualizado.DEFEITOS || [];
+          const defeitos = Array.isArray(defeitosRaw) ? defeitosRaw
+            : (typeof defeitosRaw === 'string' ? (() => { try { return JSON.parse(defeitosRaw); } catch(e) { return []; } })() : []);
 
-          const emailOk = sendComprasEmail(roloAtualizado, null, linkAcompanhamento);
+          // Tenta obter PDF salvo anteriormente
+          const pdfUrl = roloAtualizado.pdf_reprovacao_url || roloAtualizado.PDF_REPROVACAO_URL || null;
+          let relatorioFileId = null;
+          let pdfBlob = null;
+          if (pdfUrl) {
+            const m = String(pdfUrl).match(/\/d\/([a-zA-Z0-9_-]+)/);
+            relatorioFileId = (m && m[1]) ? m[1] : null;
+            if (relatorioFileId) {
+              try {
+                pdfBlob = DriveApp.getFileById(relatorioFileId).getBlob();
+              } catch(blobErr) {
+                Logger.log("[SupervisorController] Nao foi possivel obter blob do PDF: " + blobErr.message);
+              }
+            }
+          }
+
+          const emailOk = sendComprasEmail(roloAtualizado, defeitos, {
+            relatorioFileId: relatorioFileId,
+            pdfUrl: pdfUrl,
+            pdfBlob: pdfBlob
+          });
+          emailComprasEnviado = emailOk === true;
           _track(id, emailOk ? "EMAIL_COMPRAS_SENT" : "EMAIL_COMPRAS_FAILED");
+          if (!emailOk) {
+            throw new Error("O email para Compras não pôde ser enviado. Verifique o destinatário e as permissões do Drive.");
+          }
         }
 
         if (
@@ -235,14 +260,14 @@ var SupervisorController = (function () {
         status: "SUCESSO",
         id,
         fase_atual: faseFinal,
+        email_compras_enviado: emailComprasEnviado,
+        pdf_reprovacao_url: null,
         override_usado: result?.override_usado || false
       };
 
     } catch (e) {
       Logger.log("Supervisor ERROR: " + (e.stack || e.message));
       return { status: "FALHA", message: e.message };
-    } finally {
-      try { lock.releaseLock(); } catch (e) {}
     }
   }
 

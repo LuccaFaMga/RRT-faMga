@@ -32,8 +32,15 @@
     "CRÍTICA": 4,
     "CRITICO": 4,
     "CRÍTICO": 4,
+    
+    "FURO": 4,  // ✅ Furos são considerados críticos
+    "FURADO": 4,
+    "PERFURADO": 4,
+    
+    "NENHUMA": 0,
+    "SEM DEFEITO": 0,
+    "OK": 0,
 
-    "FURO": 4,
     "4_FURO": 4
   };
 
@@ -94,8 +101,75 @@
   }
 
   // ============================================================
-  // STATUS INFORMATIVO (NUNCA DECISÓRIO)
+  // VALIDAÇÕES DE NORMAS ABNT
   // ============================================================
+  function validateFurosLimit(defeitos, tipoTecido, pesoKg = 0, metros = 0) {
+    const furos = defeitos.filter(d => 
+      String(d.gravidade || '').toUpperCase() === 'FURO' || 
+      String(d.tipo || '').toUpperCase().includes('FURO')
+    );
+    
+    const furosCount = furos.length;
+    let limite = 0;
+    let unidade = '';
+    
+    if (tipoTecido === 'MALHA') {
+      limite = 6; // Máximo 6 furos por 20kg
+      unidade = 'por 20kg';
+      // Se tiver peso, ajusta o limite proporcionalmente
+      if (pesoKg > 0) {
+        limite = Math.floor((pesoKg / 20) * 6);
+      }
+    } else {
+      limite = 6; // Máximo 6 furos por 100m
+      unidade = 'por 100m';
+      // Se tiver metragem, ajusta o limite proporcionalmente
+      if (metros > 0) {
+        limite = Math.floor((metros / 100) * 6);
+      }
+    }
+    
+    return {
+      furosCount,
+      limite,
+      unidade,
+      excedido: furosCount > limite,
+      mensagem: furosCount > limite 
+        ? `⚠️ LIMITE DE FUROS EXCEDIDO: ${furosCount} furos (limite: ${limite} ${unidade})`
+        : `✅ Furos dentro do limite: ${furosCount} (limite: ${limite} ${unidade})`
+    };
+  }
+  
+  function validatePontosPorMetro(defeitos, metros = 0) {
+    if (metros <= 0) return { excedido: false, mensagem: 'Metragem insuficiente para validação' };
+    
+    // Conta pontos por metro linear
+    const pontosPorMetro = {};
+    defeitos.forEach(d => {
+      const pontos = normalizeGravidade(d.gravidade);
+      if (pontos > 0) {
+        const metroInicio = Math.floor(parseFloat(d.metro_inicial || d.metroInicial || 0));
+        const metroFim = Math.floor(parseFloat(d.metro_final || d.metroFinal || metroInicio));
+        
+        for (let m = metroInicio; m <= metroFim; m++) {
+          pontosPorMetro[m] = (pontosPorMetro[m] || 0) + pontos;
+        }
+      }
+    });
+    
+    const maxPontos = Math.max(...Object.values(pontosPorMetro), 0);
+    const limite = 4; // 4 pontos por metro linear
+    
+    return {
+      maxPontos,
+      limite,
+      excedido: maxPontos > limite,
+      mensagem: maxPontos > limite
+        ? `⚠️ LIMITE DE PONTOS/METRO EXCEDIDO: ${maxPontos} pontos (limite: ${limite} pontos/metro)`
+        : `✅ Pontos por metro dentro do limite: ${maxPontos} (limite: ${limite} pontos/metro)`,
+      detalhesPorMetro: pontosPorMetro
+    };
+  }
   function getQualityStatus(pontosPor100m2, limite = 35) {
     return Number(pontosPor100m2) > limite
       ? 'ACIMA DO LIMITE DE REFERÊNCIA'
@@ -109,27 +183,11 @@
   }
 
   // ============================================================
-  // CÁLCULO PADRÃO (PLANO)
+  // CÁLCULO PADRÃO (PLANO) - ATUALIZADO PARA USAR TIPO
   // ============================================================
   function calcularPontuacao(data) {
-    const defeitos = data?.defects || [];
-    const comprimento = data?.metros_maquina || data?.comprimento_revisado || 0;
-    const larguraCm = data?.largura_cm || 0;
-
-    const totalPontos = calculatePoints(defeitos);
-    const pontosPor100m2 = calculatePointsPer100m2(
-      totalPontos,
-      comprimento,
-      larguraCm
-    );
-
-    return {
-      totalPontos,
-      pontosPor100m2,
-      statusQualidadePontos: getQualityStatus(pontosPor100m2),
-      tipo_tecido: 'PLANO',
-      observacao: 'Pontuação informativa — decisão é do supervisor'
-    };
+    // Usa a nova função que diferencia malha vs plano
+    return calcularPontuacaoPorTipo(data);
   }
 
   // ============================================================
@@ -137,10 +195,14 @@
   // ============================================================
   function calcularPontuacaoPorTipo(data) {
     const tipo = String(data?.tipo_tecido || 'PLANO').toUpperCase();
+    const defeitos = Array.isArray(data?.defects)
+      ? data.defects
+      : (Array.isArray(data?.defeitos) ? data.defeitos : []);
+    const totalPontosInformado = ArithmeticUtils.toNumber(data?.total_pontos || data?.pontos || 0, 1);
     
     if (tipo === 'MALHA') {
       // Para malha: usar peso em kg (data.peso_kg ou data.supplier_weight)
-      const pesoKg = ArithmeticUtils.toNumber(data.peso_kg || data.supplier_weight || 0, 2);
+      const pesoKg = ArithmeticUtils.toNumber(data?.peso_kg || data?.supplier_weight || data?.wid || 0, 2);
       if (pesoKg <= 0) {
         return {
           totalPontos: 0,
@@ -151,9 +213,13 @@
         };
       }
 
-      const totalPontos = calculatePoints(data?.defects || []);
+      const totalPontos = defeitos.length ? calculatePoints(defeitos) : totalPontosInformado;
       const pontosPor100kg = (totalPontos * 100) / pesoKg;
       const pontosPor100kgArredondado = ArithmeticUtils.roundABNT(pontosPor100kg, 3);
+
+      // Validações específicas para malha
+      const validacaoFuros = validateFurosLimit(defeitos, 'MALHA', pesoKg, 0);
+      const validacaoPontosMetro = validatePontosPorMetro(defeitos, pesoKg * 10); // Estimativa: 1kg ≈ 10m de malha
 
       return {
         totalPontos,
@@ -161,12 +227,57 @@
         statusQualidadePontos: getQualityStatus(pontosPor100kgArredondado, 30), // Limite mais restritivo para malha
         tipo_tecido: 'MALHA',
         observacao: `Pontuação por peso: ${pontosPor100kgArredondado} pontos/100kg (Limite: 30). Decisão do supervisor.`,
-        pesoKg: pesoKg
+        pesoKg: pesoKg,
+        validacoes: {
+          furos: validacaoFuros,
+          pontosPorMetro: validacaoPontosMetro
+        }
       };
     }
 
     // Para tecido plano: usar metragem em m² (padrão)
-    return calcularPontuacao(data);
+    const comprimento = ArithmeticUtils.toNumber(
+      data?.metros_maquina ||
+      data?.comprimento_revisado ||
+      data?.metros_revisado ||
+      data?.revised_meters ||
+      data?.wid ||
+      data?.metros_fornecedor ||
+      0,
+      3
+    );
+    const larguraCm = ArithmeticUtils.toNumber(data?.largura_cm || 0, 2);
+    
+    if (comprimento <= 0 || larguraCm <= 0) {
+      return {
+        totalPontos: 0,
+        pontosPor100m2: 0,
+        statusQualidadePontos: 'DIMENSÕES INSUFICIENTES PARA CÁLCULO',
+        tipo_tecido: 'PLANO',
+        observacao: 'Metragem ou largura não registrada. Cálculo não possível.'
+      };
+    }
+
+    const totalPontos = defeitos.length ? calculatePoints(defeitos) : totalPontosInformado;
+    const pontosPor100m2 = calculatePointsPer100m2(totalPontos, comprimento, larguraCm);
+
+    // Validações específicas para plano
+    const validacaoFuros = validateFurosLimit(defeitos, 'PLANO', 0, comprimento);
+    const validacaoPontosMetro = validatePontosPorMetro(defeitos, comprimento);
+
+    return {
+      totalPontos,
+      pontosPor100m2,
+      statusQualidadePontos: getQualityStatus(pontosPor100m2, 35), // Limite padrão para plano
+      tipo_tecido: 'PLANO',
+      observacao: `Pontuação por área: ${pontosPor100m2} pontos/100m² (Limite: 35). Decisão do supervisor.`,
+      metros: comprimento,
+      larguraCm: larguraCm,
+      validacoes: {
+        furos: validacaoFuros,
+        pontosPorMetro: validacaoPontosMetro
+      }
+    };
   }
 
   // ============================================================

@@ -234,8 +234,13 @@ function sendComprasEmail(mainData, defects, docs) {
     const fn = "sendComprasEmail_v7";
 
     try {
+        const textValue = (value, fallback = "Não informado") => {
+            const text = String(value == null ? "" : value).trim();
+            return text || fallback;
+        };
         const to = CONFIG.EMAIL.COMPRAS;
-        const id = mainData.id_do_rolo || mainData.ID_ROLO || mainData.roll_id || mainData.product_id || "N/A";
+        // ✅ CORRIGIDO: Usa revision_id优先, depois id_do_rolo
+        const id = textValue(mainData.id_do_rolo || mainData.ID_ROLO || mainData.roll_id || mainData.produto_id || mainData.PRODUTO_ID, "Não informado");
         if (!to) throw new Error("Email de Compras não configurado.");
 
         LogApp.log(`[${fn}] Enviando email para Compras: ${to} (rolo ${id}).`, LogApp.LEVELS.INFO);
@@ -255,23 +260,121 @@ function sendComprasEmail(mainData, defects, docs) {
                     CONFIG?.URL?.SUPERVISOR_APP ||
                     ScriptApp.getService().getUrl();
                 const linkAcompanhamento = `${garantiaBase}?page=compras&id=${encodeURIComponent(id)}`;
+                const fornecedorEmail = textValue(mainData.fornecedor || mainData.FORNECEDOR || mainData.fornecedor_nome);
+                const nfEmail = textValue(mainData.nf || mainData.NF || mainData.nota_fiscal);
+                const produtoEmail = textValue(mainData.produto_id || mainData.PRODUTO_ID || mainData.product_id);
+                const metrosEmail = textValue(mainData.metros_revisado || mainData.METROS_REVISADO || mainData.metros_fornecedor || mainData.METROS_FORNECEDOR);
+                const pontosEmail = textValue(mainData.pontos || mainData.PONTOS || mainData.pontos_totais, "0");
 
         let defeitosHtml = "<ul>";
-        if (!defects?.length) defeitosHtml += "<li>Nenhum defeito de alto impacto registrado.</li>";
+        if (!defects?.length) defeitosHtml += "<li>Nenhum defeito registrado.</li>";
         else defects.forEach(d => {
-            defeitosHtml += `<li><b>${d.tipo}</b> — ${d.metro_inicial || d.metroInicial}m → ${d.metro_final || d.metroFinal}m (${d.gravidade || "N/A"})</li>`;
+            // ✅ FORMATAÇÃO EM PORTUGUÊS
+            const tipoFormatado = formatDefeitoTipoEmail(d.tipo || d.tipo_defeito || d.nome_defeito || 'Desconhecido');
+            const metrosInicio = d.metro_inicial || d.metroInicial || d.metragem_inicial || 'N/A';
+            const metrosFim = d.metro_final || d.metroFinal || d.metragem_final || 'N/A';
+            const gravidade = d.gravidade || d.severidade || 'N/A';
+            
+            defeitosHtml += `<li><b>${tipoFormatado}</b> — ${metrosInicio}m → ${metrosFim}m (${gravidade})</li>`;
         });
         defeitosHtml += "</ul>";
 
+        // ✅ FUNÇÃO AUXILIAR PARA FORMATAR DEFEITOS EM PORTUGUÊS
+        function formatDefeitoTipoEmail(tipoRaw) {
+            const raw = String(tipoRaw || '').trim().toLowerCase();
+            const map = {
+                'appearance_shade': 'Variação de cor',
+                'appearance shade': 'Variação de cor',
+                'physical_damage': 'Dano físico',
+                'physical damage': 'Dano físico',
+                'hole': 'Furo',
+                'furo': 'Furo',
+                'stain': 'Mancha',
+                'mancha': 'Mancha',
+                'dirty_stain': 'Mancha de sujeira',
+                'dirty stain': 'Mancha de sujeira',
+                'crease': 'Vinco',
+                'vinco': 'Vinco',
+                'thickness': 'Espessura',
+                'snag': 'Enroscado',
+                'enroscado': 'Enroscado',
+                'print_pattern': 'Defeito na estampa',
+                'print pattern': 'Defeito na estampa',
+                'estampa': 'Defeito na estampa',
+                'bolha': 'Bolha',
+                'fio_puxado': 'Fio puxado',
+                'rasgo': 'Rasgo',
+                'desfiado': 'Desfiado',
+                'ponto_solt': 'Ponto solto',
+                'tingimento': 'Defeito de tingimento',
+                'textura': 'Defeito de textura',
+                'deformacao': 'Deformação',
+                'marcacao': 'Marcação',
+                'queimado': 'Queimado',
+                'leve': 'Leve',
+                'medio': 'Médio',
+                'grave': 'Grave',
+                'critico': 'Crítico'
+            };
+            if (!raw) return 'Desconhecido';
+            if (map[raw]) return map[raw];
+            return raw.replace(/[_-]+/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+        }
+
+        const attachments = relatorioFile
+            ? [relatorioFile.getBlob()]
+            : (docs?.pdfBlob ? [docs.pdfBlob] : []);
+
         const body = `
             <p>O rolo <b>${id}</b> foi <b style="color:#dc3545;">REPROVADO</b> pelo Supervisor. Solicitação de GARANTIA/DEVOLUÇÃO necessária.</p>
-            <h3>Defeitos</h3>
+            
+            <h3>📋 Dados do Tecido</h3>
+            <table style="border-collapse: collapse; width: 100%; margin-bottom: 20px;">
+                <tr style="background: #f8f9fa;">
+                    <td style="padding: 8px; border: 1px solid #ddd; font-weight: bold;">ID Original:</td>
+                    <td style="padding: 8px; border: 1px solid #ddd;">${id}</td>
+                </tr>
+                <tr>
+                    <td style="padding: 8px; border: 1px solid #ddd; font-weight: bold;">Fornecedor:</td>
+                    <td style="padding: 8px; border: 1px solid #ddd;">${fornecedorEmail}</td>
+                </tr>
+                <tr style="background: #f8f9fa;"><td style="padding: 8px; border: 1px solid #ddd; font-weight: bold;">NF:</td><td style="padding: 8px; border: 1px solid #ddd;">${nfEmail}</td></tr>
+                <tr><td style="padding: 8px; border: 1px solid #ddd; font-weight: bold;">Produto:</td><td style="padding: 8px; border: 1px solid #ddd;">${produtoEmail}</td></tr>
+                <tr style="background: #f8f9fa;">
+                    <td style="padding: 8px; border: 1px solid #ddd; font-weight: bold;">Tipo:</td>
+                    <td style="padding: 8px; border: 1px solid #ddd;">${textValue(mainData.tipo_tecido || mainData.TIPO_TECIDO)}</td>
+                </tr>
+                <tr><td style="padding: 8px; border: 1px solid #ddd; font-weight: bold;">Metragem:</td><td style="padding: 8px; border: 1px solid #ddd;">${metrosEmail} m</td></tr>
+                <tr style="background: #f8f9fa;"><td style="padding: 8px; border: 1px solid #ddd; font-weight: bold;">Pontuação:</td><td style="padding: 8px; border: 1px solid #ddd;">${pontosEmail}</td></tr>
+                <tr>
+                    <td style="padding: 8px; border: 1px solid #ddd; font-weight: bold;">Cor:</td>
+                    <td style="padding: 8px; border: 1px solid #ddd;">${textValue(mainData.cor || mainData.COR)}</td>
+                </tr>
+                <tr style="background: #f8f9fa;">
+                    <td style="padding: 8px; border: 1px solid #ddd; font-weight: bold;">Lote:</td>
+                    <td style="padding: 8px; border: 1px solid #ddd;">${textValue(mainData.lote || mainData.LOTE)}</td>
+                </tr>
+            </table>
+            
+            <h3>🔍 Defeitos Identificados</h3>
             ${defeitosHtml}
-            <div style="text-align:center; margin-top:15px;">
+            
+            ${mainData.observacoes ? `
+            <h3>📝 Observações do Supervisor</h3>
+            <div style="background: #fff3cd; border-left: 4px solid #ff9500; padding: 12px; margin-bottom: 20px;">
+                ${mainData.observacoes}
+            </div>
+            ` : ''}
+            
+            <div style="text-align:center; margin-top:25px;">
                 <a href="${linkAcompanhamento}" style="background:#3498db;color:white;padding:14px 25px;border-radius:6px;text-decoration:none;font-weight:bold;font-size:16px;">
-                    Acompanhar Status da Garantia
+                    📊 Acompanhar Status da Garantia
                 </a>
             </div>
+            
+            <p style="margin-top: 20px; font-size: 12px; color: #666;">
+                📄 <b>${attachments.length ? 'PDF completo anexado' : 'PDF não anexado'}</b> para análise detalhada.
+            </p>
         `;
 
         const html = _emailTemplate({
@@ -283,10 +386,6 @@ function sendComprasEmail(mainData, defects, docs) {
             body,
             qr: relUrl ? _qrCode(relUrl) : _qrCode(linkAcompanhamento)
         });
-
-                const attachments = relatorioFile
-                    ? [relatorioFile.getBlob()]
-                    : (docs?.pdfBlob ? [docs.pdfBlob] : []);
 
         MailApp.sendEmail({
             to,

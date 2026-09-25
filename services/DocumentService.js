@@ -8,19 +8,24 @@
 const MimeType = DocumentApp.MimeType; 
 // Define o tamanho do bloco para o Mapa 2D
 const BLOCK_SIZE_2D = 2;
+// Largura máxima para imagens em células (otimização de performance)
+const MAX_IMAGE_WIDTH = 280;
 /* ============================================================
  * 📁 DRIVE — PASTAS
  * ============================================================ */
 // getOrCreateRollFolderSimple() — INLINED into getOrCreateRollFolder (simpler logic)
 
-function getOrCreateRollFolder(id) {
-  if (!id) throw new Error("ID do rolo inválido.");
+function getOrCreateRollFolder(id, revisionId = null) {
+  // Usa revision_id se disponível, senão usa id
+  const folderName = revisionId || id;
+  
+  if (!folderName) throw new Error("Nome da pasta inválido.");
   
   // 🛡️ Usar Optional Chaining para evitar erro 'CONFIG is undefined'
   const rootId = CONFIG?.IDS?.PASTA_RRT || CONFIG?.IDS?.OUTPUT_FOLDER;
   const root = rootId ? DriveApp.getFolderById(rootId) : DriveApp.getRootFolder();
-  const it = root.getFoldersByName(String(id));
-  const roll = it.hasNext() ? it.next() : root.createFolder(String(id));
+  const it = root.getFoldersByName(String(folderName));
+  const roll = it.hasNext() ? it.next() : root.createFolder(String(folderName));
   
   return {
     roll,
@@ -163,42 +168,44 @@ function processRRTAsyncJob() {
  * 📄 ORQUESTRADOR PRINCIPAL
  * ============================================================ */
 function generateAllDocs(mainData, defects, photoIds, reportType) {
-  const id = mainData?.id_do_rolo;
-  if (!id) throw new Error("ID ausente.");
+  const id = mainData?.id_do_rolo;
+  const revisionId = mainData?.revision_id;
+  if (!id) throw new Error("ID ausente.");
 
-  // 🛑 CORREÇÃO DE VULNERABILIDADE: Adiciona Optional Chaining
-  const templateId =
-    reportType === 'compras'
-      ? CONFIG?.IDS?.TEMPLATE_FOTOS
-      : CONFIG?.IDS?.TEMPLATE_RELATORIO;
+  // 🛑 CORREÇÃO DE VULNERABILIDADE: Adiciona Optional Chaining
+  const templateId =
+    reportType === 'compras'
+      ? CONFIG?.IDS?.TEMPLATE_FOTOS
+      : CONFIG?.IDS?.TEMPLATE_RELATORIO;
 
-  if (!templateId) {
-    throw new Error(`Template não configurado para o tipo de relatório: ${reportType}. Verifique CONFIG.IDS.`);
-  }
+  if (!templateId) {
+    throw new Error(`Template não configurado para o tipo de relatório: ${reportType}. Verifique CONFIG.IDS.`);
+  }
 
-  const { roll, relatorio, fotos } = getOrCreateRollFolder(id);
-  const inlinePhotos = saveInlinePhotos(defects, fotos);
-  const finalPhotos = [...new Set([...(photoIds || []), ...inlinePhotos])];
+  // ✅ MUDANÇA: Usa revision_id para nome da pasta
+  const { roll, relatorio, fotos } = getOrCreateRollFolder(id, revisionId);
+  const inlinePhotos = saveInlinePhotos(defects, fotos);
+  const finalPhotos = [...new Set([...(photoIds || []), ...inlinePhotos])];
 
-  // A função generateReport agora retorna o File do PDF
-  const pdfFile = generateReport(
-    templateId,
-    mainData,
-    defects,
-    finalPhotos,
-    relatorio,
-    reportType
-  );
+  // A função generateReport agora retorna o File do PDF
+  const pdfFile = generateReport(
+    templateId,
+    mainData,
+    defects,
+    finalPhotos,
+    relatorio,
+    reportType
+  );
 
-  // ✅ MUDANÇA: Obter o Blob do PDF para anexar ao e-mail
-  const pdfBlob = pdfFile.getBlob(); 
+  // ✅ MUDANÇA: Obter o Blob do PDF para anexar ao e-mail
+  const pdfBlob = pdfFile.getBlob(); 
 
-  return {
-    pastaRolo: roll.getId(),
-    relatorioFileId: pdfFile.getId(),
-    pdfBlob: pdfBlob, // <<< RETORNA O BLOB PARA ANEXO NO EMAIL
-    savedPhotoIds: inlinePhotos
-  };
+  return {
+    pastaRolo: roll.getId(),
+    relatorioFileId: pdfFile.getId(),
+    pdfBlob: pdfBlob, // <<< RETORNA O BLOB PARA ANEXO NO EMAIL
+    savedPhotoIds: inlinePhotos
+  };
 }
 // ============================================================
 // 4) GERAÇÃO DO RELATÓRIO (DOC → PDF) - FINAL REVISADO
@@ -382,7 +389,7 @@ function generateReport(templateId, mainData, defects, photoIds, targetFolder, r
 
         if (!pdfBlob) throw new Error("PDF Blob inválido após conversão do Docs.");
 
-        const pdfFileName = `RRT_RELATORIO_${safeReportType}_${mainData.id_do_rolo}.pdf`;
+        const pdfFileName = `RRT_RELATORIO_${safeReportType}_${mainData.revision_id || mainData.id_do_rolo}.pdf`;
         const pdfFile = targetFolder.createFile(pdfBlob).setName(pdfFileName);
 
         try { docsCopy.setTrashed(true); } catch(err) { Logger.log("Erro ao deletar cópia Docs: " + err); }
@@ -710,7 +717,7 @@ function build2DRollMapGridNative(mainData, defects) {
         // --- POPULAR MAPA DE AFETAÇÃO ---
         (defects || []).forEach((d) => {
             const metroStart = parseFloat(d.metro_inicial || d.metroInicial);
-            const zonesAffected = String(d.posicao_largura || d.posicaoLargura || 'C').toUpperCase().split(',').map(z => z.trim());
+            const zonesAffected = String(d.posicao_largura || d.posicaoLargura || 'C').toUpperCase().split(',').map(z => String(z).trim());
             
             if (isNaN(metroStart)) return;
 
@@ -773,16 +780,16 @@ function buildWidthMapTableNative(defects) {
     const affectedZones = new Set(); 
 
     (defects || []).forEach(d => {
-        const pos = d.posicao_largura || d.posicaoLargura;
-        if (pos) {
-            pos.toUpperCase().split(',').forEach(zone => {
-                const trimmedZone = zone.trim();
-                if (ZONES.includes(trimmedZone)) {
-                    affectedZones.add(trimmedZone); // Esta é a linha que deve estar aqui
-                }
-            });
-        }
-    });
+        const pos = d.posicao_largura || d.posicaoLargura;
+        if (pos && typeof pos === 'string') {
+            pos.toUpperCase().split(',').forEach(zone => {
+                const trimmedZone = zone.trim();
+                if (ZONES.includes(trimmedZone)) {
+                    affectedZones.add(trimmedZone); // Esta é a linha que deve estar aqui
+                }
+            });
+        }
+    });
 
     const header = ZONES.map(zone => `Zona ${zone}`);
     const statusRow = ZONES.map(zone => {
@@ -850,33 +857,90 @@ function saveInlinePhotos(defects, fotosFolder) {
         const ext = mime.split("/")[1];
         const name = `DEF_${d.tipo}_${Date.now()}_${i}.${ext}`;
 
-        const blob = Utilities.newBlob(Utilities.base64Decode(data), mime, name);
-        const file = fotosFolder.createFile(blob);
+          const blob = Utilities.newBlob(Utilities.base64Decode(data), mime, name);
+          const file = fotosFolder.createFile(blob);
 
-        file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+          file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
 
-        d.saved_photo_id = file.getId();
-        out.push(file.getId());
+          d.saved_photo_id = file.getId();
+          out.push(file.getId());
 
-      } catch (_err) {
-        // Ignora erros de salvamento de foto se Base64 for inválido ou ausente
-      }
-    });
+        } catch (_err) {
+          // Ignora erros de salvamento de foto se Base64 for inválido ou ausente
+        }
+      });
 
-    return out;
+      return out;
 }
 
 /* ============================================================
- * 🧩 NORMALIZAÇÃO (PDF + EMAIL)
- * ============================================================ */
+ * 🧩 NORMALIZAÇÃO (PDF + EMAIL)
+ * ============================================================ */
 function normalizeDefects(defects = []) {
-  return defects.map(d => {
-    const pontos = Number(d.pontos_totais || d.pontos || 0);
-    return {
-      ...d,
-      gravidade_texto:
-        pontos === 4 ? "GRAVE" :
-        pontos > 0 ? "LEVE" : "NENHUMA"
-    };
-  });
+  return defects.map(d => {
+    const pontos = Number(d.pontos_totais || d.pontos || 0);
+    return {
+      ...d,
+      gravidade_texto:
+        pontos === 4 ? "GRAVE" :
+        pontos > 0 ? "LEVE" : "NENHUMA"
+    };
+  });
 }
+
+/* ============================================================
+ * GERAÇÃO DE PDF LINK (CORREÇÃO PARA MALHAS)
+ * ============================================================ */
+function generateRevisionPDFLink(idRolo, reportType = 'supervisor') {
+  try {
+    Logger.log(`[DocumentService] Gerando PDF link para rolo ${idRolo}, tipo: ${reportType}`);
+    
+    // Busca dados do rolo
+    const roll = DatabaseService.rolls.get(idRolo);
+    if (!roll) {
+      throw new Error(`Rolo ${idRolo} não encontrado`);
+    }
+    
+    // Prepara dados para geração
+    const mainData = {
+      id_do_rolo: idRolo,
+      revision_id: roll.revision_id || roll.REVISION_ID, // 
+      tipo_tecido: roll.tipo_tecido || roll.TIPO_TECIDO || 'PLANO',
+      fornecedor: roll.fornecedor || roll.FORNECEDOR || '',
+      produto_id: roll.produto_id || roll.PRODUTO_ID || '',
+      metros_maquina: roll.metros_revisado || roll.METROS_REVISADO || 0,
+      metros_fornecedor: roll.metros_fornecedor || roll.METROS_FORNECEDOR || 0,
+      largura_cm: roll.largura_cm || roll.LARGURA_CM || 0,
+      peso_kg: roll.peso_kg || roll.PESO_KG || 0,
+      cor: roll.cor || roll.COR || '',
+      lote: roll.lote || roll.LOTE || '',
+      observacoes: roll.observacoes || roll.OBSERVACOES || '',
+      defeitos: roll.defeitos || roll.DEFEITOS || []
+    };
+    
+    // Gera PDF usando função existente
+    const docs = generateAllDocs(mainData, mainData.defeitos, [], reportType);
+    
+    if (docs && docs.relatorioFileId) {
+      const file = DriveApp.getFileById(docs.relatorioFileId);
+      const pdfUrl = file.getUrl();
+      Logger.log(`[DocumentService] PDF gerado com sucesso: ${pdfUrl}`);
+      return pdfUrl;
+    } else {
+      throw new Error('Falha ao gerar PDF - arquivo não retornado');
+    }
+    
+  } catch (error) {
+    Logger.log(`[DocumentService] Erro ao gerar PDF link: ${error.message}`);
+    throw error;
+  }
+}
+
+// Export global para uso em outros módulos
+globalThis.DocumentService = {
+  generateAllDocs: generateAllDocs,
+  generateReport: generateReport,
+  generateRevisionPDFLink: generateRevisionPDFLink,
+  getOrCreateRollFolder: getOrCreateRollFolder,
+  processRRTAsyncJob: processRRTAsyncJob
+};

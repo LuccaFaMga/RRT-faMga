@@ -112,11 +112,7 @@ WorkflowService = (function () {
     if (!id) throw new Error("transition(): id ausente.");
     if (!next_phase) throw new Error("transition(): next_phase ausente.");
 
-    const lock = LockService.getScriptLock();
-    lock.waitLock(10000);
-
-    try {
-      next_phase = String(next_phase).trim().toLowerCase();
+    next_phase = String(next_phase).trim().toLowerCase();
 
       const force = options.force === true;
       const usuario = options.usuario || "sistema";
@@ -150,17 +146,14 @@ WorkflowService = (function () {
 
       DatabaseService.rolls.update(id, payload);
 
-      return {
+    return {
         status: "OK",
         id,
         de: current,
         para: next_phase,
         override_usado: !allowed && force,
         historico_status
-      };
-    } finally {
-      lock.releaseLock();
-    }
+    };
   }
 
   /* ============================================================

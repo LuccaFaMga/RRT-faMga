@@ -1,8 +1,6 @@
 {
   "scriptId": "1ph_-oJD13u-dA5pQftBm_wD4xtCtPopN9aLgvcdoVO1pNRKkZ-bU7ka8",
-
   "rootDir": "",
-
   "scriptExtensions": [
     ".js",
     ".gs"
@@ -14,20 +12,5 @@
     ".json"
   ],
   "filePushOrder": [],
-  "skipSubdirectories": false,
-  "ignorePatterns": [
-    "generate-icons.js",
-    "temp_extract.js",
-    "node_modules/**",
-    ".git/**",
-    "icons/**",
-    "ui/**",
-    "README.md",
-    ".gitignore",
-    "package.json",
-    "package-lock.json",
-    "manifest.json",
-    "service-worker.js",
-    "offline-manager.js"
-  ]
+  "skipSubdirectories": false
 }

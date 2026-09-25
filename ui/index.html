@@ -4,24 +4,12 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>FA Maringá - Controle de Qualidade Têxtil</title>
-    <meta name="theme-color" content="#0b63ff">
-    <link rel="manifest" href="./manifest.json">
-    <link rel="icon" type="image/png" href="./icons/icon-192x192.png">
-    <link rel="apple-touch-icon" href="./icons/icon-192x192.png">
     
     <!-- Google Fonts -->
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     
     <!-- Font Awesome -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <script>
-        if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('./service-worker.js')
-                .then(() => console.log('✅ Service Worker registrado'))
-                .catch((err) => console.warn('⚠️ Service Worker falhou:', err));
-        }
-    </script>
-    <script src="backend-shim.js"></script>
     
     <style>
         * {
@@ -790,7 +778,7 @@
                             <h3>Revisão de Tecidos</h3>
                             <p>Scanner de QR Code, registro de defeitos e geração de relatórios completos de qualidade</p>
                         </div>
-                        <a href="./reviewer.html" class="btn btn-primary btn-block">
+                        <a href="?page=reviewer" target="_top" class="btn btn-primary btn-block dynamic-link">
                             <i class="fas fa-play"></i>
                             Iniciar Revisão
                         </a>
@@ -804,7 +792,7 @@
                             <h3>Gestão de Tecidos</h3>
                             <p>Visualize, gerencie tecidos, aprove revisões e controle movimentações</p>
                         </div>
-                        <a href="./estoque.html" class="btn btn-primary btn-block">
+                        <a href="?page=estoque" target="_top" class="btn btn-primary btn-block dynamic-link">
                             <i class="fas fa-boxes"></i>
                             Gerenciar Estoque
                         </a>
@@ -1009,75 +997,139 @@
         }
 
         // ==================== KPI LOADING ====================
+        // 🔑 CONSTANTE: Substitua pela URL do seu Google Apps Script Web App
+        // Ex: https://script.google.com/macros/d/YOUR_SCRIPT_ID/usercodeappsscript
+        const GOOGLE_SCRIPT_URL = "SUA_URL_AQUI";
+
         function loadKPIData() {
             try {
-                // Mostrar estado de carregamento
                 const syncStatus = document.getElementById('status-sync');
                 if (syncStatus) {
                     syncStatus.textContent = '⏳ Atualizando dados...';
                 }
 
-                // Chamar backend com google.script.run
-                if (typeof google !== 'undefined' && google.script && google.script.run) {
-                    google.script.run
-                        .withSuccessHandler(function(response) {
-                            console.log('[INDEX] KPI Data recebido:', response);
-                            
-                            if (response && response.status === 'sucesso' && response.kpi) {
-                                // Atualizar elementos com dados reais
-                                const kpi = response.kpi;
-                                document.getElementById('kpi-reprovacao').textContent = (kpi.reprovacao || 0) + '%';
-                                document.getElementById('kpi-defeitos').textContent = kpi.defeitos_100m || '0';
-                                document.getElementById('kpi-pendencias').textContent = (kpi.pendencias_pct || 0) + '%';
-                                document.getElementById('kpi-tempo').textContent = (kpi.tempo_medio_dias || 0) + 'd';
-                                
-                                // Atualizar status
-                                const now = new Date().toLocaleTimeString('pt-BR', { 
-                                    hour: '2-digit', 
-                                    minute: '2-digit' 
-                                });
-                                syncStatus.textContent = `✅ Sincronizado às ${now}`;
-                                
-                                console.log('✅ [KPI] Dados reais carregados:', kpi);
-                            } else {
-                                console.warn('⚠️ [KPI] Resposta inválida:', response);
-                                syncStatus.textContent = '⚠️ Erro na sincronização';
-                            }
-                        })
-                        .withFailureHandler(function(error) {
-                            console.error('❌ [KPI] Erro ao buscar dados:', error);
-                            syncStatus.textContent = '⚠️ Erro ao buscar dados';
-                        })
-                        .getKPIDashboardData();
-                } else {
-                    // Fallback: usar dados fictícios se não estiver em contexto GAS
-                    console.warn('⚠️ [KPI] google.script.run não disponível, usando dados de exemplo');
-                    const kpiData = {
-                        reprovacao: Math.floor(Math.random() * 6) + 3,
-                        defeitos_100m: (Math.random() * 4 + 1).toFixed(2),
-                        pendencias_pct: Math.floor(Math.random() * 16) + 10,
-                        tempo_medio_dias: (Math.random() * 2 + 1).toFixed(1)
-                    };
-
-                    document.getElementById('kpi-reprovacao').textContent = kpiData.reprovacao + '%';
-                    document.getElementById('kpi-defeitos').textContent = kpiData.defeitos_100m;
-                    document.getElementById('kpi-pendencias').textContent = kpiData.pendencias_pct + '%';
-                    document.getElementById('kpi-tempo').textContent = kpiData.tempo_medio_dias + 'd';
-
-                    const now = new Date().toLocaleTimeString('pt-BR', { 
-                        hour: '2-digit', 
-                        minute: '2-digit' 
-                    });
-                    syncStatus.textContent = `✅ Modo Demo - ${now}`;
+                // Verificar se a URL foi configurada
+                if (!GOOGLE_SCRIPT_URL || GOOGLE_SCRIPT_URL === "SUA_URL_AQUI") {
+                    console.warn('⚠️ [KPI] GOOGLE_SCRIPT_URL não configurada. Usando Modo Demo.');
+                    activateDemoMode(syncStatus);
+                    return;
                 }
+
+                // 🔑 Fazer fetch GET para a rota kpi_data do Google Apps Script
+                const apiUrl = `${GOOGLE_SCRIPT_URL}?page=kpi_data`;
+                console.log('[KPI] Buscando dados de:', apiUrl);
+
+                fetch(apiUrl, {
+                    method: 'GET',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                })
+                .then(response => {
+                    console.log('[KPI] Status da resposta:', response.status);
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    console.log('[KPI] Dados recebidos do backend:', data);
+
+                    // Validar estrutura da resposta
+                    if (data && data.status === 'sucesso' && data.kpi) {
+                        const kpi = data.kpi;
+                        
+                        // ✅ Mapear dados reais para os elementos HTML
+                        const elements = {
+                            'kpi-reprovacao': `${kpi.reprovacao || 0}%`,
+                            'kpi-defeitos': `${kpi.defeitos_100m || 0}`,
+                            'kpi-pendencias': `${kpi.pendencias_pct || 0}%`,
+                            'kpi-tempo': `${kpi.tempo_medio_dias || 0}d`
+                        };
+
+                        Object.entries(elements).forEach(([id, value]) => {
+                            const element = document.getElementById(id);
+                            if (element) {
+                                element.textContent = value;
+                                console.log(`✅ [KPI] ${id} atualizado para: ${value}`);
+                            } else {
+                                console.warn(`⚠️ [KPI] Elemento #${id} não encontrado no HTML`);
+                            }
+                        });
+
+                        // Atualizar timestamp de sincronização
+                        const now = new Date().toLocaleTimeString('pt-BR', {
+                            hour: '2-digit',
+                            minute: '2-digit'
+                        });
+                        syncStatus.textContent = `✅ Sincronizado às ${now}`;
+                        console.log('✅ [KPI] Todos os dados reais carregados com sucesso');
+
+                    } else {
+                        console.error('❌ [KPI] Estrutura de resposta inválida:', data);
+                        syncStatus.textContent = '⚠️ Estrutura de dados inválida';
+                        activateDemoMode(syncStatus);
+                    }
+                })
+                .catch(error => {
+                    console.error('❌ [KPI] Erro ao buscar dados:', error.message);
+                    console.error('[KPI] Stack:', error.stack);
+                    syncStatus.textContent = `⚠️ Erro: ${error.message}`;
+                    activateDemoMode(syncStatus);
+                });
+
             } catch (error) {
-                console.error('❌ [KPI] Erro geral:', error);
-                document.getElementById('status-sync').textContent = '⚠️ Erro na sincronização';
+                console.error('❌ [KPI] Erro geral na função:', error);
+                activateDemoMode(document.getElementById('status-sync'));
             }
+        }
+
+        /**
+         * 📊 Ativa o Modo Demo quando não há conexão real
+         * Carrega dados fictícios para demonstração
+         */
+        function activateDemoMode(statusElement) {
+            console.log('📊 [KPI] Ativando Modo Demo com dados fictícios');
+
+            const demoData = {
+                'kpi-reprovacao': `${Math.floor(Math.random() * 6) + 3}%`,
+                'kpi-defeitos': `${(Math.random() * 4 + 1).toFixed(2)}`,
+                'kpi-pendencias': `${Math.floor(Math.random() * 16) + 10}%`,
+                'kpi-tempo': `${(Math.random() * 2 + 1).toFixed(1)}d`
+            };
+
+            Object.entries(demoData).forEach(([id, value]) => {
+                const element = document.getElementById(id);
+                if (element) {
+                    element.textContent = value;
+                }
+            });
+
+            const now = new Date().toLocaleTimeString('pt-BR', {
+                hour: '2-digit',
+                minute: '2-digit'
+            });
+            
+            if (statusElement) {
+                statusElement.textContent = `📊 Modo Demo - ${now}`;
+            }
+
+            console.log('✅ [KPI] Modo Demo ativado com dados de exemplo');
         }
 
         // ==================== INITIALIZATION ====================
         document.addEventListener('DOMContentLoaded', () => {
+    // O Apps Script renderiza a página dentro de um iframe googleusercontent.
+    // A URL pública é injetada pelo doGet para que os links não apontem para o iframe interno.
+        const currentBaseUrl = <?!= JSON.stringify(APP_URL || '') ?>;
+
+    // Localiza os botões configurados e injeta a URL atualizada em tempo real
+        const dynamicLinks = document.querySelectorAll('.dynamic-link');
+        dynamicLinks.forEach(link => {
+            const pageParam = link.getAttribute('href'); // Ex: "?page=reviewer"
+            link.href = currentBaseUrl + pageParam;      // Une a URL do deploy atual ao parâmetro
+        });
+
             loadTheme();
             loadCompanyLogo();
 

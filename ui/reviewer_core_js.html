@@ -1,0 +1,3100 @@
+<script>
+// =========================================================================
+// ✅ CACHE GLOBAL DE ELEMENTOS - Reduz repetidas chamadas a getElementById()
+// =========================================================================
+const ElementCache = {
+  mainForm: null,
+  btnScanQr: null,
+  respSelect: null,
+  reviewTimer: null,
+  toast: null,
+  loader: null,
+  startOverlay: null,
+  
+  init() {
+    console.log('[DEBUG_CACHE] Inicializando ElementCache...');
+    this.mainForm = document.getElementById('mainForm');
+    this.btnScanQr = document.getElementById('btnScanQr');
+    this.respSelect = document.getElementById('resp');
+    this.reviewTimer = document.getElementById('reviewTimer');
+    this.toast = document.getElementById('toast');
+    this.loader = document.getElementById('loader');
+    this.startOverlay = document.getElementById('startOverlay');
+    
+    console.log('[DEBUG_CACHE] Elementos capturados:');
+    console.log('  - mainForm:', !!this.mainForm);
+    console.log('  - btnScanQr:', !!this.btnScanQr);
+    console.log('  - respSelect:', !!this.respSelect);
+    console.log('  - reviewTimer:', !!this.reviewTimer);
+    console.log('  - toast:', !!this.toast);
+    console.log('  - loader:', !!this.loader);
+    console.log('  - startOverlay:', !!this.startOverlay);
+  }
+};
+
+// =========================================================================
+// 0. VARIÁVEIS GLOBAIS 
+// =========================================================================
+const DEBUG = false; // ✅ DESABILITAR console.log em produção
+
+if (!DEBUG) {
+  console.log = () => {};
+  console.debug = () => {};
+}
+
+const TIMER_STATE = {
+  STOPPED: 'stopped',
+  RUNNING: 'running',
+  PAUSED: 'paused'
+};
+
+const ReviewState = {
+  review_id: null,
+  roll_id: null,
+  revisor_nome: null,
+  timer_state: TIMER_STATE.STOPPED,
+  tempo_total_seg: 0,
+  interval: null,
+  pending_qr_data: null,
+  previous_resp_selection: ''
+};
+
+// ==========================================================
+// PATCH: Aliases globais reais (compatibilidade total)
+// ==========================================================
+Object.defineProperty(window, 'roll_id', {
+  get: () => ReviewState.roll_id,
+  set: v => { ReviewState.roll_id = v; }
+});
+
+Object.defineProperty(window, 'review_id', {
+  get: () => ReviewState.review_id,
+  set: v => { ReviewState.review_id = v; }
+});
+
+Object.defineProperty(ReviewState, 'tempo_total_seg', {
+  get() {
+    return this.elapsed_seconds || 0;
+  },
+  set(v) {
+    this.elapsed_seconds = v;
+  }
+});
+
+// =========================================================================
+// 0.1 COMPATIBILIDADE LEGADA (READ-ONLY)
+// =========================================================================
+
+Object.defineProperty(window, 'REVIEW_ID', {
+  get: () => ReviewState.review_id
+});
+
+Object.defineProperty(window, 'ROLL_ID', {
+  get: () => ReviewState.roll_id
+});
+
+Object.defineProperty(window, 'reviewTimerSeconds', {
+  get: () => ReviewState.tempo_total_seg
+});
+
+Object.defineProperty(window, 'openerName', {
+  get: () => ReviewState.revisor_nome
+});
+
+Object.defineProperty(window, 'TOTAL_POINTS', {
+  get: () =>
+    (typeof DefectManager !== 'undefined' && DefectManager.getTotalPoints)
+      ? DefectManager.getTotalPoints()
+      : 0
+});
+
+// =========================================================================
+// 1. CONFIGURAÇÕES
+// =========================================================================
+const CONFIG = {
+  MAX_FILE_SIZE_WARN: 10 * 1024 * 1024,
+  MAX_FILE_SIZE_HARD: 40 * 1024 * 1024,
+  MAX_UPLOAD_BASE64_SIZE: 2.5 * 1024 * 1024,
+  ALLOWED_MIME_TYPES: ['image/jpeg', 'image/png', 'image/jpg'],
+  TOAST_DURATION: 3600,
+  PROGRESS_HIDE_DELAY: 600,
+  MAX_DEFECTS: 30,
+  MAX_STRING_LENGTH: {
+    FORNECEDOR: 200,
+    OBSERVACOES: 1000,
+    TIPO_DEFEITO: 200
+  },
+  MAX_RENDER_CACHE: 10 // ✅ Limitar cache de renders
+};
+
+// =========================================================================
+// 1.5 EVENT LISTENER TRACKER (Evita memory leak)
+// =========================================================================
+const ListenerTracker = {
+  listeners: [],
+  
+  on(element, event, handler) {
+    if (!element) return;
+    element.addEventListener(event, handler);
+    this.listeners.push({ element, event, handler });
+  },
+  
+  removeAll() {
+    this.listeners.forEach(({ element, event, handler }) => {
+      try { element.removeEventListener(event, handler); } catch (e) {}
+    });
+    this.listeners = [];
+  }
+};
+
+// =========================================================================
+// 2. UTILIDADES
+// =========================================================================
+const Utils = {
+  toSnakeCase(s) {
+    if (s === null || s === undefined) return s;
+    return String(s)
+      .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+      .replace(/[^\w\d_]+/g, '_')
+      .replace(/__+/g, '_')
+      .replace(/^_+|_+$/, '')
+      .toLowerCase();
+  },
+
+  toSnakeCaseObject(obj) {
+    const norm = {};
+    Object.keys(obj || {}).forEach(k => {
+      norm[this.toSnakeCase(k)] = obj[k];
+    });
+    return norm;
+  },
+
+  escapeHtml(s) {
+    if (s === null || s === undefined) return '';
+    const map = {
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;',
+      "'": '&#039;'
+    };
+    return String(s).replace(/[&<>"']/g, m => map[m]);
+  },
+  
+  // Debounce para otimizar eventos frequentes
+  debounce(func, wait) {
+    let timeout;
+    return function executedFunction(...args) {
+      const later = () => {
+        clearTimeout(timeout);
+        func(...args);
+      };
+      clearTimeout(timeout);
+      timeout = setTimeout(later, wait);
+    };
+  },
+  
+  // Throttle para limitar frequência de execução
+  throttle(func, limit) {
+    let inThrottle;
+    return function(...args) {
+      if (!inThrottle) {
+        func.apply(this, args);
+        inThrottle = true;
+        setTimeout(() => inThrottle = false, limit);
+      }
+    };
+  }
+};
+
+// Helper para selects / inputs
+function sel(...ids) {
+  for (const id of ids) {
+    const el = UI.getEl(id);
+    if (!el) continue;
+
+    if (el.tagName === 'SELECT') {
+      const opt = el.options[el.selectedIndex];
+      if (opt && opt.text) return opt.text.trim();
+    }
+    if (el.value) return String(el.value).trim();
+  }
+  return '';
+}
+
+// =========================================================================
+// 3. TIMER (NÃO CONHECE DOM)
+// =========================================================================
+
+function startReviewTimer(initialSeconds = null) {
+  console.log('[DEBUG_TIMER] 🚀 startReviewTimer chamado com initialSeconds:', initialSeconds);
+  console.log('[DEBUG_TIMER] Estado atual do timer:', ReviewState.timer_state);
+  
+  // Evita iniciar se já estiver rodando
+  if (ReviewState.timer_state === TIMER_STATE.RUNNING) {
+    console.log('[DEBUG_TIMER] ⚠️ Timer já está rodando. Abortando.');
+    return;
+  }
+
+  // Aplica tempo inicial (ex: vindo do backend)
+  if (typeof initialSeconds === 'number' && initialSeconds >= 0) {
+    ReviewState.tempo_total_seg = initialSeconds;
+    UI.updateTimerDisplay(ReviewState.tempo_total_seg);
+    console.log('[DEBUG_TIMER] ✅ Tempo inicial definido:', initialSeconds, 'segundos');
+  }
+
+  // 🔒 Segurança: garante que não existe intervalo anterior
+  if (ReviewState.interval) {
+    console.log('[DEBUG_TIMER] 🔒 Limpando intervalo anterior');
+    clearInterval(ReviewState.interval);
+    ReviewState.interval = null;
+  }
+
+  ReviewState.timer_state = TIMER_STATE.RUNNING;
+  console.log('[DEBUG_TIMER] ✅ Estado do timer definido para RUNNING');
+
+  // 🎯 Mostrar elemento de status completamente
+  const reviewStatusEl = document.getElementById('reviewStatus');
+  if (reviewStatusEl) {
+    reviewStatusEl.removeAttribute('hidden');
+    reviewStatusEl.style.display = 'flex';
+    reviewStatusEl.style.opacity = '1';
+    reviewStatusEl.style.visibility = 'visible';
+    console.log('[DEBUG_TIMER] ✅ reviewStatus mostrado com display flex');
+  }
+
+  ReviewState.interval = setInterval(() => {
+    if (ReviewState.timer_state === TIMER_STATE.RUNNING) {
+      ReviewState.tempo_total_seg++;
+      UI.updateTimerDisplay(ReviewState.tempo_total_seg);
+      if (ReviewState.tempo_total_seg % 10 === 0) {
+        console.log('[DEBUG_TIMER] ⏱️ Timer em', ReviewState.tempo_total_seg, 'segundos');
+      }
+    }
+  }, 1000);
+  
+  console.log('[DEBUG_TIMER] ✅ setInterval criado com ID:', ReviewState.interval);
+}
+
+const TimerAudit = {
+  events: [],
+  lastEventTs: null,
+
+  log(eventName) {
+    const now = new Date().toISOString();
+    let duration = 0;
+
+    if (this.lastEventTs) {
+      duration = Math.floor(
+        (new Date(now) - new Date(this.lastEventTs)) / 1000
+      );
+    }
+
+    this.events.push({
+      event: eventName,
+      timestamp: now,
+      duracao_seg: duration
+    });
+
+    this.lastEventTs = now;
+  },
+
+  getLogs() {
+    return this.events.map(e => ({
+      event: e.event,
+      timestamp: e.timestamp,
+      duracao_seg: e.duracao_seg
+    }));
+  }
+};
+
+function pauseReviewTimer() {
+  if (ReviewState.timer_state !== TIMER_STATE.RUNNING) return;
+  ReviewState.timer_state = TIMER_STATE.PAUSED;
+  TimerAudit.log('PAUSE');
+}
+
+function resumeReviewTimer() {
+  if (ReviewState.timer_state !== TIMER_STATE.PAUSED) return;
+  ReviewState.timer_state = TIMER_STATE.RUNNING;
+  TimerAudit.log('RESUME');
+}
+
+function stopReviewTimer() {
+  clearInterval(ReviewState.interval);
+  ReviewState.interval = null;
+  ReviewState.timer_state = TIMER_STATE.STOPPED;
+}
+
+function finalizeTimer() {
+  if (ReviewState.timer_state === TIMER_STATE.RUNNING) {
+    pauseReviewTimer();
+  }
+  TimerAudit.log('END_REVIEW');
+  return ReviewState.tempo_total_seg;
+}
+
+// =========================================================================
+// 3. UI HELPERS
+// =========================================================================
+const UI = {
+    _loaderTimeout: null,
+    _externalLoaderManaged: false,
+
+    // ✅ OTIMIZADO: Sem throttle desnecessário (timer já é sincronizado a 1s)
+    updateTimerDisplay(seconds) {
+        let el = ElementCache.reviewTimer;
+        
+        // Se não estiver no cache, busca direto do DOM
+        if (!el) {
+            el = document.getElementById('reviewTimer');
+            if (!el) {
+                console.error('[DEBUG_TIMER] ❌ Elemento reviewTimer NÃO ENCONTRADO!');
+                return;
+            }
+        }
+
+        const h = String(Math.floor(seconds / 3600)).padStart(2, '0');
+        const m = String(Math.floor((seconds % 3600) / 60)).padStart(2, '0');
+        const s = String(seconds % 60).padStart(2, '0');
+
+        const timeStr = `${h}:${m}:${s}`;
+        el.textContent = timeStr;
+        el.innerText = timeStr;
+        
+        // Log apenas a cada 10 segundos para evitar spam
+        if (seconds % 10 === 0) {
+            console.log('[DEBUG_TIMER] 🔄 Display atualizado:', timeStr, '| Elemento encontrado:', !!el);
+        }
+    },
+
+    togglePauseButton(isPaused) {
+        console.log('[DEBUG_PAUSE_BTN] togglePauseButton chamado com isPaused:', isPaused);
+        
+        const pauseText = document.getElementById('pauseText');
+        const pauseIcon = document.getElementById('pauseIcon');
+        const pausedLabel = document.getElementById('reviewPausedLabel');
+        const statusIndicator = document.getElementById('statusIndicator');
+        const statusLabel = document.getElementById('statusLabel');
+
+        console.log('[DEBUG_PAUSE_BTN] Elementos encontrados:', {
+            pauseText: !!pauseText,
+            pauseIcon: !!pauseIcon,
+            pausedLabel: !!pausedLabel,
+            statusIndicator: !!statusIndicator,
+            statusLabel: !!statusLabel
+        });
+
+        if (isPaused) {
+            console.log('[DEBUG_PAUSE_BTN] Configurando UI para modo PAUSADO');
+            if (pauseText) pauseText.textContent = 'Retomar';
+            if (pauseIcon) pauseIcon.textContent = '▶️';
+            if (pausedLabel) pausedLabel.hidden = false;
+            if (statusIndicator) statusIndicator.style.color = '#f59e0b';
+            if (statusLabel) statusLabel.textContent = 'REVISÃO PAUSADA';
+        } else {
+            console.log('[DEBUG_PAUSE_BTN] Configurando UI para modo ATIVO');
+            if (pauseText) pauseText.textContent = 'Pausar';
+            if (pauseIcon) pauseIcon.textContent = '⏸️';
+            if (pausedLabel) pausedLabel.hidden = true;
+            if (statusIndicator) statusIndicator.style.color = '#28a745';
+            if (statusLabel) statusLabel.textContent = 'REVISÃO EM ANDAMENTO';
+        }
+    },
+
+    // ✅ OTIMIZADO: showToast com debounce + ElementCache
+    showToast: Utils.debounce(function(msg, color) {
+        const t = ElementCache.toast;
+        if (!t) return;
+        t.style.background = color || '#16a34a';
+        t.textContent = String(msg || '');
+        t.classList.add('show');
+        clearTimeout(t._hideT);
+        t._hideT = setTimeout(() => t.classList.remove('show'), CONFIG.TOAST_DURATION);
+    }, 300),
+
+    showLoader(on) {
+        const l = ElementCache.loader;
+        if (this._externalLoaderManaged && on === false) return;
+        if (l) l.style.display = on ? 'flex' : 'none';
+    },
+    setLoaderManagedExternally(flag) { this._externalLoaderManaged = !!flag; },
+    setProgress(p) {
+        const wrap = document.getElementById('progressWrap');
+        const bar = document.getElementById('progressBar');
+        if (!wrap || !bar) return;
+        const pct = Math.max(0, Math.min(100, Number(p) || 0));
+        bar.style.width = `${pct}%`;
+        if (pct === 0) wrap.style.display = 'none';
+        else if (pct >= 100) {
+            wrap.style.display = 'block';
+            setTimeout(() => { wrap.style.display='none'; bar.style.width='0%'; }, CONFIG.PROGRESS_HIDE_DELAY);
+        } else wrap.style.display='block';
+    },
+    getEl(id) { return document.getElementById(id); }
+};
+
+  if (typeof window !== 'undefined') {
+    window.showToast = (msg, color) => UI.showToast(msg, color);
+  }
+
+// =========================================================================
+// 4. VALIDATION
+// =========================================================================
+const Validation = {
+    validateFileSize(file) {
+        if (!file) return { valid:false, error:'❌ Nenhum arquivo selecionado.' };
+    if (file.size > CONFIG.MAX_FILE_SIZE_HARD) {
+      const maxMB = (CONFIG.MAX_FILE_SIZE_HARD/1024/1024).toFixed(0);
+      return { valid:false, error:`❌ Arquivo extremamente grande (${(file.size/1024/1024).toFixed(1)}MB). Máximo ${maxMB}MB.` };
+    }
+    if (file.size > CONFIG.MAX_FILE_SIZE_WARN) {
+      return {
+        valid:true,
+        warn:true,
+        message:`⚠️ Foto grande (${(file.size/1024/1024).toFixed(1)}MB). Otimizando automaticamente...`
+      };
+        }
+        return { valid:true };
+    },
+    validateFileType(file) {
+        if (!file) return { valid:false, error:'❌ Nenhum arquivo selecionado.' };
+        const mime = file.type.toLowerCase();
+        const isAllowed = CONFIG.ALLOWED_MIME_TYPES.includes(mime) || CONFIG.ALLOWED_MIME_TYPES.some(m=>file.name.toLowerCase().endsWith(m.split('/')[1]));
+        if (!isAllowed) return { valid:false, error:'❌ Formato não suportado. Use JPEG ou PNG.' };
+        return { valid:true };
+    },
+    validatePositiveNumber(v, field='Campo') {
+        const n = Number(v);
+        if (isNaN(n) || n < 0) return { valid:false, error:`❌ ${field} deve ser número >=0` };
+        return { valid:true, value:n };
+    },
+    validateRequired(el, name) {
+        if (!el) return { valid:false, error:`❌ Campo "${name}" não encontrado.` };
+        const v = String(el.value || '').trim();
+        if (!v) return { valid:false, error:`❌ "${name}" é obrigatório.` };
+        return { valid:true };
+    },
+    validateMaxLength(v, max, name) {
+        if (String(v).length > max) return { valid:false, error:`❌ "${name}" excede ${max} caracteres.` };
+        return { valid:true };
+    }
+};
+
+// =========================================================================
+// 5. STATE
+// =========================================================================
+const State = {
+    defects: [],
+    nextId: 1,
+    addDefect(d) {
+        d = Utils.toSnakeCaseObject(d);
+        if (this.defects.length >= CONFIG.MAX_DEFECTS) { UI.showToast(`Máx ${CONFIG.MAX_DEFECTS} defeitos`, '#ef4444'); return false; }
+        this.defects.push({ ...d, id:this.nextId++, foto_id:d.foto_id||(d.foto_base64?'[PENDING_NEW]':'') });
+        return true;
+    },
+    removeDefect(i) { if(i>=0 && i<this.defects.length) this.defects.splice(i,1); },
+    clearDefects() { this.defects=[]; this.nextId=1; },
+    updateDefect(id, up) { const d=this.defects.find(x=>x.id===id); if(d){ Object.assign(d, Utils.toSnakeCaseObject(up)); } }
+};
+
+// =========================================================================
+// 6. FILE HANDLER (OTIMIZADO PARA LOW-END)
+// =========================================================================
+const FileHandler = {
+    // Cache para imagens processadas
+    _imageCache: new Map(),
+    // ✅ OTIMIZADO: Limite de cache por tamanho total (previne crashes)
+    _cacheMaxSize: 20 * 1024 * 1024, // 20MB máximo
+    _currentCacheSize: 0,
+    
+    _estimateDataUrlBytes(dataUrl) {
+      if (!dataUrl) return 0;
+      const base64 = String(dataUrl).split(',')[1] || '';
+      return Math.floor((base64.length * 3) / 4);
+    },
+
+    // Reduz tamanho de imagem para mobile
+    async resizeImage(dataUrl, maxWidth = 800, maxHeight = 600, quality = 0.7) {
+        return new Promise((resolve) => {
+            const img = new Image();
+            img.onload = () => {
+                const canvas = document.createElement('canvas');
+                const ctx = canvas.getContext('2d');
+                
+                let { width, height } = img;
+                
+                // Calcular novo tamanho mantendo proporção
+                if (width > maxWidth || height > maxHeight) {
+                    const ratio = Math.min(maxWidth / width, maxHeight / height);
+                    width *= ratio;
+                    height *= ratio;
+                }
+                
+                canvas.width = width;
+                canvas.height = height;
+                
+                ctx.drawImage(img, 0, 0, width, height);
+                resolve(canvas.toDataURL('image/jpeg', quality));
+            };
+            img.src = dataUrl;
+        });
+    },
+    
+    async fileToDataURL(file) {
+        if (!file) return Promise.reject(new Error('Nenhum arquivo'));
+        
+        // Validar arquivo
+        const sizeValidation = Validation.validateFileSize(file);
+        if (!sizeValidation.valid) return Promise.reject(new Error(sizeValidation.error));
+      if (sizeValidation.warn && sizeValidation.message && typeof UI !== 'undefined' && UI.showToast) {
+        UI.showToast(sizeValidation.message, '#f59e0b');
+      }
+        
+        const typeValidation = Validation.validateFileType(file);
+        if (!typeValidation.valid) return Promise.reject(new Error(typeValidation.error));
+        
+        // Verificar cache
+        const cacheKey = `${file.name}_${file.size}_${file.lastModified}`;
+        if (this._imageCache.has(cacheKey)) {
+            return Promise.resolve(this._imageCache.get(cacheKey));
+        }
+        
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = async (e) => {
+                try {
+                    let dataUrl = e.target.result;
+                    
+                // Reduzir imagem com estratégia adaptativa (sem bloquear produção)
+                if (file.size > 8 * 1024 * 1024) {
+                  dataUrl = await this.resizeImage(dataUrl, 1280, 960, 0.55);
+                } else if (file.size > 4 * 1024 * 1024) {
+                  dataUrl = await this.resizeImage(dataUrl, 1600, 1200, 0.6);
+                } else if (file.size > 2 * 1024 * 1024) {
+                  dataUrl = await this.resizeImage(dataUrl, 1920, 1440, 0.68);
+                }
+
+                // Segunda passada se ainda estiver grande para upload estável
+                const optimizedBytes = this._estimateDataUrlBytes(dataUrl);
+                if (optimizedBytes > CONFIG.MAX_UPLOAD_BASE64_SIZE) {
+                  dataUrl = await this.resizeImage(dataUrl, 1024, 768, 0.5);
+                    }
+                    
+                    // ✅ OTIMIZADO: Limite por tamanho total ao invés de contagem
+                const dataSize = this._estimateDataUrlBytes(dataUrl);
+                    if (this._currentCacheSize + dataSize > this._cacheMaxSize) {
+                        this.clearCache(); // Limpar tudo se não couber
+                        this._currentCacheSize = 0;
+                    }
+                    this._imageCache.set(cacheKey, dataUrl);
+                    this._currentCacheSize += dataSize;
+                    
+                    resolve(dataUrl);
+                } catch (err) {
+                    reject(err);
+                }
+            };
+            reader.onerror = () => reject(new Error('Erro leitura arquivo'));
+            reader.readAsDataURL(file);
+        });
+    },
+    
+    parseDataURL(dataUrl) {
+        if (!dataUrl) return null;
+        const m = String(dataUrl).match(/^data:(image\/[0-9a-zA-Z.+-]+)(?:;charset=[^;]+)?;base64,(.*)$/);
+        return m ? { mimeType: m[1], base64: m[2] } : null;
+    },
+    
+    // Limpar cache para liberar memória
+    clearCache() {
+        this._imageCache.clear();
+        this._currentCacheSize = 0;
+    }
+};
+
+// =========================================================================
+// 7. SERVER
+// =========================================================================
+const Server = {
+    isAvailable(){ return typeof google !== 'undefined' && google.script && typeof google.script.run === 'object'; },
+    
+    async call(functionName, payload = null) {
+        // ========================================================= //
+        // OFFLINE MODE: Check if offline and queue data
+        // ========================================================= //
+        if (!navigator.onLine && window.OfflineManager) {
+            console.log('[OFFLINE] 📦 Queueing offline request:', functionName);
+            
+            // Queue the data for later sync
+            const queueData = {
+                functionName: functionName,
+                payload: payload || {}
+            };
+            
+            try {
+                await window.OfflineManager.queueData(functionName, queueData, 'POST');
+                
+                // Update queue indicator
+                const queueElement = document.getElementById('offline-queue-count');
+                if (queueElement) {
+                    const count = window.OfflineManager.getQueueLength?.() || 0;
+                    queueElement.textContent = `${count} itens na fila`;
+                }
+                
+                // Show toast notification
+                if (window.showToast) {
+                    showToast('📤 Solicitação enfileirada. Será sincronizada quando reconectar.');
+                }
+            } catch (err) {
+                console.error('[OFFLINE] ❌ Queue error:', err);
+            }
+            
+            return new Promise((res, rej) => {
+                rej(new Error('Você está offline. A solicitação foi enfileirada e será enviada quando reconectar.'));
+            });
+        }
+        
+        // ========================================================= //
+        // ONLINE MODE: Normal server call
+        // ========================================================= //
+        if(!this.isAvailable()) throw new Error('Serviço Google indisponível');
+        
+        return new Promise((res, rej) => {
+            const runner = google.script.run
+                .withSuccessHandler(r => {
+                  // Se o retorno for nulo, rejeita.
+                  if (!r) return rej(new Error(`${functionName} retornou vazio.`));
+                    
+                  // Se o retorno tiver status, valida o status.
+                  // Aceitar também respostas com status 'OK' (compatibilidade servidor)
+                  if (r.hasOwnProperty('status')) {
+                    if (r.status === 'SUCESSO' || r.status === 'PENDENTE' || r.status === 'OK') {
+                      res(r);
+                    } else {
+                      rej(new Error(r.message || `${functionName} falhou.`));
+                    }
+                  } else {
+                    // Funções de consulta simples (ex: checkActiveRoll)
+                    res(r);
+                  }
+                })
+                .withFailureHandler(e => {
+                    console.error(`[SERVER ERR] ${functionName}:`, e);
+                    rej(e || new Error(`Falha na comunicação com o servidor.`));
+                });
+
+            // Chama a função no backend (com ou sem payload)
+            if (payload !== null) {
+                runner[functionName](payload);
+            } else {
+                runner[functionName]();
+            }
+        });
+    },
+
+    // Atalhos
+    async checkActiveRoll(responsavel) { return this.call('checkActiveRoll', responsavel); },
+    initializeRoll(payload) { return this.call('initializeRollAndGetId', payload); },
+    uploadDefectPhoto(payload) { return this.call('uploadDefectPhoto', payload); },
+    processRRT(data) { return this.call('processarRRT_Web', data); },
+    saveStructuredData(payload) { return this.call('insertStructuredData', payload); }
+};
+
+// =========================================================================
+// 8. DEFECT MANAGER (OTIMIZADO PARA MOBILE)
+// =========================================================================
+const DefectManager = {
+    // Cache para elementos renderizados
+    _renderCache: new Map(),
+    // ✅ OTIMIZADO: Um IntersectionObserver global ao invés de um por imagem
+    _imageObserver: null,
+    // ✅ NOVO: Rastrear última contagem para evitar re-render desnecessário
+    _lastDefectCount: 0,
+    
+    initImageObserver() {
+        if (this._imageObserver) return; // Evitar duplicata
+        
+        if ('IntersectionObserver' in window) {
+            // ✅ OTIMIZADO: threshold mínimo (1%) e rootMargin para preload suave
+            this._imageObserver = new IntersectionObserver((entries) => {
+                entries.forEach(entry => {
+                    if (entry.isIntersecting) {
+                        const src = entry.target.dataset.src;
+                        if (src && entry.target.src !== src) {
+                            entry.target.src = src;
+                            this._imageObserver.unobserve(entry.target); // Parar de observar
+                        }
+                    }
+                });
+            }, { threshold: 0.01, rootMargin: '50px' }); // 1% visible + 50px antecedência
+        }
+    },
+    
+    // Lazy loading para imagens (agora usa observer global)
+    _loadImageLazy(img, src) {
+        if (!src) return;
+        
+        // Usar observer global
+        if ('IntersectionObserver' in window && this._imageObserver) {
+            img.dataset.src = src;
+            this._imageObserver.observe(img);
+        } else {
+            // Fallback para browsers mais antigos
+            setTimeout(() => img.src = src, 100);
+        }
+    },
+    
+    // Otimizado: render com throttling MAIS conservador (100ms → 500ms para evitar excesso de renders)
+    render: Utils.throttle(function() {
+        const list = UI.getEl('defect-list'); 
+        if (!list) return;
+        
+        // ✅ OTIMIZADO: Evitar re-render se número de defeitos não mudou
+        if (State.defects.length === this._lastDefectCount && this._renderCache.size > 0) {
+            return; // Nada mudou, pular re-render
+        }
+        this._lastDefectCount = State.defects.length;
+        
+        // ✅ Limpar cache se cresceu demais (LRU - evita memory leak)
+        if (this._renderCache.size > CONFIG.MAX_RENDER_CACHE) {
+            const firstKey = this._renderCache.keys().next().value;
+            this._renderCache.delete(firstKey);
+        }
+        
+        // Usar DocumentFragment para melhor performance
+        const fragment = document.createDocumentFragment();
+        
+        State.defects.forEach((d, idx) => {
+            const cacheKey = `defect_${d.id}_${idx}`;
+            let card = this._renderCache.get(cacheKey);
+            
+            if (!card) {
+                card = this._createDefectCard(d, idx);
+                this._renderCache.set(cacheKey, card);
+            } else {
+                // Atualizar apenas dados dinâmicos
+                this._updateDefectCard(card, d, idx);
+            }
+            
+            fragment.appendChild(card);
+        });
+        
+        list.innerHTML = '';
+        list.appendChild(fragment);
+    }, 500), // ✅ OTIMIZADO: 100ms → 500ms (reduzir redraw de defeitos)
+    
+    _createDefectCard(d, idx) {
+        const card = document.createElement('div');
+        card.className = 'defect-card';
+        card.dataset.defectId = d.id;
+        
+        const img = document.createElement('img');
+        img.className = 'defect-thumb';
+        img.alt = 'Foto defeito ' + (idx + 1);
+        
+        // Lazy loading para imagem
+        const placeholderSvg = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iOTYiIGhlaWdodD0iOTYiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PHJlY3Qgd2lkdGg9Ijk2IiBoZWlnaHQ9Ijk2IiBmaWxsPSIjZjNmNGY1Ii8+PHRleHQgeD0iNDgiIHk9IjUwIiBmb250LWZhbWlseT0iQXJpYWwiIGZvbnQtc2l6ZT0iMTEiIGZpbGw9IiM5OTkiIHRleHQtYW5jaG9yPSJtaWRkbGUiPlNlbSBmb3RvPC90ZXh0Pjwvc3ZnPg==';
+        
+        const imageSrc = d.foto_url || d.foto_base64 || placeholderSvg;
+        if (imageSrc !== placeholderSvg) {
+            this._loadImageLazy(img, imageSrc);
+        } else {
+            img.src = placeholderSvg;
+        }
+        
+        const meta = document.createElement('div');
+        meta.className = 'defect-meta';
+        
+        const actions = document.createElement('div');
+        actions.className = 'defect-actions';
+        
+        // Criar botões
+        const editBtn = document.createElement('button');
+        editBtn.className = 'small btn-secondary';
+        editBtn.innerHTML = '✏️ Editar';
+        editBtn.addEventListener('click', () => {
+            this.showEditModal(d, idx);
+        });
+        
+        const removeBtn = document.createElement('button');
+        removeBtn.className = 'small btn-danger';
+        removeBtn.innerHTML = '🗑 Remover';
+        removeBtn.addEventListener('click', () => {
+            if (!confirm(`Remover o defeito "${d.tipo || d.nome_defeito}"?`)) return;
+            State.removeDefect(idx);
+            this._renderCache.delete(`defect_${d.id}_${idx}`);
+            this.render();
+            UI.showToast('Defeito removido');
+        });
+        
+        actions.appendChild(editBtn);
+        actions.appendChild(removeBtn);
+        
+        card.appendChild(img);
+        card.appendChild(meta);
+        card.appendChild(actions);
+        
+        // Atualizar conteúdo
+        this._updateDefectCard(card, d, idx);
+        
+        return card;
+    },
+    
+    _updateDefectCard(card, d, idx) {
+        const meta = card.querySelector('.defect-meta');
+        if (!meta) return;
+        
+        let created = '';
+        try {
+            created = d.criado_em ? new Date(d.criado_em).toLocaleString('pt-BR') : '';
+        } catch (e) {
+            created = '';
+        }
+        
+        const fotoStatusHtml = (d.foto_id && d.foto_id !== '[PENDING]')
+            ? `<div style="color:var(--green);font-size:11px;margin-top:4px">✓ Foto enviada (ID: ${Utils.escapeHtml(String(d.foto_id).substring(0, 8))}...)</div>`
+            : (d.foto_id === '[PENDING]'
+                ? `<div style="color:#f59e0b;font-size:11px;margin-top:4px">⏳ Upload pendente</div>`
+                : '<div style="color:#9ca3af;font-size:11px;margin-top:4px">⚠ Foto não enviada</div>');
+        
+        const zonasDisplay = Array.isArray(d.posicao_largura)
+            ? Utils.escapeHtml(d.posicao_largura.join(', '))
+            : Utils.escapeHtml(String(d.posicao_largura || ''));
+        
+        meta.innerHTML = `<strong>(${idx + 1}) ${Utils.escapeHtml(String(d.tipo || d.nome_defeito || '--').toUpperCase())}</strong>
+          <div style="color:var(--muted);font-size:12px;margin-top:4px">
+          ${Utils.escapeHtml(String(d.metro_inicial || ''))}m → ${Utils.escapeHtml(String(d.metro_final || ''))}m
+          <div style="font-size:11px;color:#9ca3af;margin-top:4px">Zonas: ${zonasDisplay}</div>
+          <div style="font-size:11px;color:#9ca3af;margin-top:4px">Adicionado: ${Utils.escapeHtml(created || '—')}</div>
+          ${fotoStatusHtml}</div>`;
+    },
+    
+    async handleAddDefect(selTipo, txtTipo, miEl, mfEl, fileEl, zoneEl, gravityEl) {
+        let tipo = selTipo?.value || '';
+        if (String(tipo || '').toLowerCase() === '__outro__') tipo = txtTipo?.value?.trim()?.toUpperCase();
+        if (!tipo) { UI.showToast('Informe tipo', '#f59e0b'); return; }
+
+        const miCheck = Validation.validatePositiveNumber(miEl?.value, 'Metro inicial');
+        const mfCheck = Validation.validatePositiveNumber(mfEl?.value, 'Metro final');
+        if (!miCheck.valid || !mfCheck.valid) { UI.showToast(miCheck.error || mfCheck.error, '#ef4444'); return; }
+
+        let mi = miCheck.value, mf = mfCheck.value;
+        if (mi > mf) { [mi, mf] = [mf, mi]; UI.showToast(`Valores invertidos automaticamente: ${mi}m → ${mf}m`, '#f97316'); }
+
+        let zonas = [];
+        if (zoneEl?.options) {
+            zonas = Array.from(zoneEl.options)
+                .filter(o => o.selected)
+                .map(o => o.value);
+        }
+
+        // Gravidade
+        let gravidade = gravityEl?.value || '';
+        if (tipo.toUpperCase().includes('FURO') && (mf - mi) >= 1.5) { gravidade = '4'; }
+
+        let dataUrl = '', filename = '';
+        const f = fileEl?.files?.[0];
+        if (f) {
+            try { dataUrl = await FileHandler.fileToDataURL(f); filename = f.name; }
+            catch (e) { UI.showToast(e.message || 'Erro foto', '#ef4444'); return; }
+        }
+
+        const defect = { tipo, metro_inicial: mi, metro_final: mf, posicao_largura: zonas, gravidade, foto_base64: dataUrl, filename, criado_em: new Date().toISOString() };
+
+        if (State.addDefect(defect)) {
+            this.render();
+            UI.showToast('Defeito adicionado');
+            if (miEl) miEl.value = '';
+            if (mfEl) mfEl.value = '';
+            if (selTipo) selTipo.value = '';
+            if (txtTipo) txtTipo.value = '';
+            if (fileEl) fileEl.value = '';
+            if (gravityEl) gravityEl.value = '';
+            if (typeof resetZoneSelector === 'function') resetZoneSelector();
+        }
+    },
+
+    async uploadPhoto(defectId, index, btn) {
+  const d = State.defects.find(x => x.id === defectId);
+  if (!d) throw new Error('Defeito não encontrado');
+
+  // Já enviada com sucesso → não reenviar
+  if (d.foto_id && !['[PENDING]', '[PENDING_NEW]', '[FALHA]'].includes(d.foto_id)) {
+    return { status: 'JA_ENVIADA', defectId };
+  }
+
+  if (!d.foto_base64) {
+    throw new Error('Não há imagem para enviar');
+  }
+
+  if (!roll_id) {
+    throw new Error('ID do Rolo não inicializado');
+  }
+
+  if (btn) {
+    btn.disabled = true;
+    btn.innerText = 'Enviando...';
+  }
+
+  // Normalização defensiva do base64
+  const parsed = FileHandler.parseDataURL(d.foto_base64);
+  const base64 = (parsed && parsed.base64) ? parsed.base64 : d.foto_base64;
+
+  State.updateDefect(defectId, { foto_id: '[PENDING]' });
+  DefectManager.render();
+
+  try {
+    const payload = {
+      foto_base64: base64,
+      filename: d.filename || `defeito_${d.id || index}.jpg`,
+      nome_defeito: d.tipo || d.nome_defeito || `def_${d.id || index}`,
+      id_rolo: roll_id,
+      revisor: sel('resp', 'responsavel', 'revisor')
+    };
+
+    const res = await Server.uploadDefectPhoto(payload);
+
+    if (res.status === 'SUCESSO') {
+      State.updateDefect(defectId, {
+        foto_id: res.file_id || '',
+        saved_photo_id: res.file_id || '',
+        foto_url: res.file_url || '',
+        filename: res.filename || d.filename,
+        foto_base64: null
+      });
+
+      UI.showToast('Foto enviada');
+      return res;
+    }
+
+    if (res.status === 'PENDENTE') {
+      UI.showToast('Foto enfileirada');
+      return res;
+    }
+
+    throw new Error(res.message || 'Upload retornou status desconhecido');
+
+  } catch (e) {
+    State.updateDefect(defectId, { foto_id: '[FALHA]' });
+    throw e;
+
+  } finally {
+    if (btn) btn.disabled = false;
+    DefectManager.render();
+  }
+},
+
+    async uploadAllPhotos() {
+      const photos = State.defects.filter(d => d.foto_base64 && d.foto_id !== '[PENDING]');
+      if (photos.length === 0) return;
+
+      UI.showLoader(true);
+      UI.showToast(`Enviando ${photos.length} fotos...`);
+
+      const errors = [];
+
+      for (let i = 0; i < photos.length; i++) {
+        const defect = photos[i];
+        try {
+          await this.uploadPhoto(defect.id, i, null);
+        } catch (error) {
+          errors.push(error);
+        }
+
+        UI.setProgress(20 + Math.round(((i + 1) / photos.length) * 30));
+        await new Promise(resolve => setTimeout(resolve, 0));
+      }
+
+      if (!UI._externalLoaderManaged) UI.showLoader(false);
+      DefectManager.render();
+
+      if (errors.length > 0) {
+        const msg = errors.map(e => e?.message || 'Erro desconhecido').join('; ');
+        throw new Error(`Não foi possível enviar ${errors.length} fotos. ${msg}`);
+      }
+    },
+
+    showEditModal(defect, index) {
+        // Criar modal de edição
+        const modal = document.createElement('div');
+        modal.className = 'modal-overlay';
+        modal.style.cssText = `
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.7); z-index: 10000; display: flex;
+            align-items: center; justify-content: center;
+        `;
+
+        const modalContent = document.createElement('div');
+        modalContent.className = 'modal-content';
+        modalContent.style.cssText = `
+            background: white; border-radius: 12px; padding: 24px;
+            max-width: 500px; width: 90%; max-height: 80vh; overflow-y: auto;
+            box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1);
+        `;
+
+        modalContent.innerHTML = `
+            <h3 style="margin: 0 0 20px 0; color: var(--primary);">Editar Defeito</h3>
+            <form id="editDefectForm" style="display: flex; flex-direction: column; gap: 16px;">
+                <div>
+                    <label style="display: block; margin-bottom: 4px; font-weight: 500;">Tipo de Defeito *</label>
+                    <select id="edit_tipo_select" required style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px;">
+                        <option value="">Selecione...</option>
+                        <option value="appearance_shade">Diferença de Matiz</option>
+                        <option value="physical_damage">Dano Físico</option>
+                        <option value="hole">Furo</option>
+                        <option value="stain">Mancha</option>
+                        <option value="crease">Dobra</option>
+                        <option value="thickness">Espessura</option>
+                        <option value="__outro__">Outro...</option>
+                    </select>
+                    <input id="edit_tipo_text" type="text" placeholder="Especifique o tipo" style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px; margin-top: 8px; display: none;" />
+                </div>
+
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                    <div>
+                        <label style="display: block; margin-bottom: 4px; font-weight: 500;">Metro Inicial *</label>
+                        <input id="edit_metro_inicial" type="number" step="0.01" min="0" required style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px;" />
+                    </div>
+                    <div>
+                        <label style="display: block; margin-bottom: 4px; font-weight: 500;">Metro Final *</label>
+                        <input id="edit_metro_final" type="number" step="0.01" min="0" required style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px;" />
+                    </div>
+                </div>
+
+                <div>
+                    <label style="display: block; margin-bottom: 4px; font-weight: 500;">Zonas Afetadas *</label>
+                    <select id="edit_zonas" multiple size="4" required style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px;">
+                        <option value="A">A - Esquerda</option>
+                        <option value="B">B - Centro-Esquerda</option>
+                        <option value="C">C - Centro</option>
+                        <option value="D">D - Centro-Direita</option>
+                        <option value="E">E - Direita</option>
+                    </select>
+                    <small style="color: #6b7280; font-size: 12px;">Segure Ctrl para selecionar múltiplas zonas</small>
+                </div>
+
+                <div>
+                    <label style="display: block; margin-bottom: 4px; font-weight: 500;">Gravidade</label>
+                    <select id="edit_gravidade" style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px;">
+                        <option value="">Selecione...</option>
+                        <option value="1">1 - Leve</option>
+                        <option value="2">2 - Moderada</option>
+                        <option value="3">3 - Grave</option>
+                        <option value="4">4 - Muito Grave</option>
+                    </select>
+                </div>
+
+                <div>
+                    <label style="display: block; margin-bottom: 4px; font-weight: 500;">Nova Foto (opcional)</label>
+                    <input id="edit_foto" type="file" accept="image/jpeg,image/png" style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px;" />
+                </div>
+
+                <div style="display: flex; gap: 12px; justify-content: flex-end; margin-top: 20px;">
+                    <button type="button" id="cancelEdit" class="btn btn-ghost" style="padding: 8px 16px;">Cancelar</button>
+                    <button type="submit" class="btn btn-primary" style="padding: 8px 16px;">Salvar Alterações</button>
+                </div>
+            </form>
+        `;
+
+        modal.appendChild(modalContent);
+        document.body.appendChild(modal);
+
+        // Preencher valores atuais
+        const tipoSelect = modalContent.querySelector('#edit_tipo_select');
+        const tipoText = modalContent.querySelector('#edit_tipo_text');
+        const metroInicial = modalContent.querySelector('#edit_metro_inicial');
+        const metroFinal = modalContent.querySelector('#edit_metro_final');
+        const zonasSelect = modalContent.querySelector('#edit_zonas');
+        const gravidadeSelect = modalContent.querySelector('#edit_gravidade');
+
+        // Set tipo
+        const currentTipo = defect.tipo || defect.nome_defeito || '';
+        const predefinedTypes = ['appearance_shade', 'physical_damage', 'hole', 'stain', 'crease', 'thickness'];
+        if (predefinedTypes.includes(currentTipo)) {
+            tipoSelect.value = currentTipo;
+        } else if (currentTipo) {
+            tipoSelect.value = '__outro__';
+            tipoText.value = currentTipo;
+            tipoText.style.display = 'block';
+        }
+
+        // Set metros
+        metroInicial.value = defect.metro_inicial || '';
+        metroFinal.value = defect.metro_final || '';
+
+        // Set zonas
+        if (Array.isArray(defect.posicao_largura)) {
+            Array.from(zonasSelect.options).forEach(option => {
+                if (defect.posicao_largura.includes(option.value)) {
+                    option.selected = true;
+                }
+            });
+        }
+
+        // Set gravidade
+        gravidadeSelect.value = defect.gravidade || '';
+
+        // Toggle tipo text field
+        tipoSelect.addEventListener('change', () => {
+            tipoText.style.display = tipoSelect.value === '__outro__' ? 'block' : 'none';
+            if (tipoSelect.value !== '__outro__') tipoText.value = '';
+        });
+
+        // Cancel
+        modalContent.querySelector('#cancelEdit').addEventListener('click', () => {
+            document.body.removeChild(modal);
+        });
+
+        // Submit
+        modalContent.querySelector('#editDefectForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            let tipo = tipoSelect.value;
+            if (tipo === '__outro__') tipo = tipoText.value.trim().toUpperCase();
+            if (!tipo) {
+                UI.showToast('Informe o tipo do defeito', '#ef4444');
+                return;
+            }
+
+            const mi = parseFloat(metroInicial.value);
+            const mf = parseFloat(metroFinal.value);
+            if (isNaN(mi) || isNaN(mf) || mi < 0 || mf < 0) {
+                UI.showToast('Metros devem ser números positivos', '#ef4444');
+                return;
+            }
+            if (mi > mf) {
+                UI.showToast('Metro inicial não pode ser maior que final', '#ef4444');
+                return;
+            }
+
+            const zonas = Array.from(zonasSelect.selectedOptions).map(opt => opt.value);
+            if (zonas.length === 0) {
+                UI.showToast('Selecione pelo menos uma zona', '#ef4444');
+                return;
+            }
+
+            const gravidade = gravidadeSelect.value;
+
+            // Handle new photo
+            let photoUpdate = {};
+            const fotoInput = modalContent.querySelector('#edit_foto');
+            if (fotoInput.files && fotoInput.files[0]) {
+                try {
+                    const f = fotoInput.files[0];
+                    const dataUrl = await FileHandler.fileToDataURL(f);
+                    photoUpdate = {
+                        foto_base64: dataUrl,
+                        filename: f.name,
+                        foto_id: '[PENDING_NEW]',
+                        saved_photo_id: null
+                    };
+                } catch (error) {
+                    UI.showToast('Erro ao carregar nova foto', '#ef4444');
+                    return;
+                }
+            }
+
+            // Update defect
+            const updates = {
+                tipo,
+                metro_inicial: mi,
+                metro_final: mf,
+                posicao_largura: zonas,
+                gravidade,
+                ...photoUpdate
+            };
+
+            State.updateDefect(defect.id, updates);
+            DefectManager.render();
+            UI.showToast('Defeito atualizado com sucesso');
+
+            // Upload new photo if added
+            if (photoUpdate.foto_base64 && Server.isAvailable()) {
+                DefectManager.uploadPhoto(defect.id, index, null).catch(() => {});
+            }
+
+            document.body.removeChild(modal);
+        });
+
+        // Close on overlay click
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) {
+                document.body.removeChild(modal);
+            }
+        });
+    },
+
+    // Retorna o array de defeitos no formato CANÔNICO
+    getDefects() {
+      return State.defects.map(d => ({
+        tipo: d.tipo || d.nome_defeito || '',
+        metro_inicial: (d.metro_inicial !== undefined && d.metro_inicial !== null) ? Number(d.metro_inicial) : null,
+        metro_final: (d.metro_final !== undefined && d.metro_final !== null) ? Number(d.metro_final) : null,
+        posicao_largura: Array.isArray(d.posicao_largura) ? d.posicao_largura : (d.posicao_largura ? String(d.posicao_largura).split(',').map(s=>s.trim()) : []),
+        gravidade: d.gravidade || '',
+        foto_url: d.foto_url || '',
+        foto_id: d.foto_id || '',
+        criado_em: d.criado_em || ''
+      }));
+    },
+
+    // Retorna apenas os URLs das fotos já enviadas ao Drive
+    getUploadedPhotos() {
+      return State.defects.filter(d => d.foto_url && String(d.foto_url).trim() !== '').map(d => String(d.foto_url));
+    }
+};
+
+  // Exportar DefectManager para escopo global para uso em handlers externos
+  if (typeof window !== 'undefined') window.DefectManager = DefectManager;
+  if (typeof globalThis !== 'undefined') globalThis.DefectManager = DefectManager;
+
+// =========================================================================
+// 8.5. CANONICAL DATA COLLECTION & MAPPING
+// =========================================================================
+function collectRawFormData() {
+    const get = id => {
+        const el = UI.getEl(id);
+        return el ? String(el.value || '').trim() : '';
+    };
+    
+    const getNum = id => {
+        const el = UI.getEl(id);
+        if (!el) return null;
+        const val = el.value;
+        if (!val) return null;
+        const num = parseFloat(String(val).replace(',', '.'));
+        return isNaN(num) ? null : num;
+    };
+
+    return {
+        // IDs
+        review_id: review_id,
+        roll_id: roll_id,
+        
+        // Revisor
+        resp: get('resp'),
+        revisor_nome: sel('resp', 'responsavel', 'revisor'),
+        
+        // Fornecedor
+        supplier_id: get('supplier_id'),
+        supplier_nm: get('supplier_nm'),
+        
+        // Identificação
+        nf: get('nf'),
+        product_id: get('product_id'),
+        sup_product_id: get('sup_product_id'),
+        lot: get('lot'),
+        color_id: get('color_id'),
+        fabric_pattern: get('fabric_pattern'),
+        loc: get('loc'),
+        comp: get('comp'),
+        
+        // Estrutura
+        est_tc: get('est_tc'),
+        
+        // Medidas
+        wid: getNum('wid'),
+        len: getNum('len'),
+        revised_len: getNum('revised_len'),
+        revised_meters: getNum('revised_meters'),
+        supplier_weight: getNum('supplier_weight'),
+        
+        // Status
+        status_rolo: get('status_rolo'),
+        observacoes: get('observacoes'),
+        declaracao: UI.getEl('declaracao_checkbox')?.checked ? 'CIENTE' : 'NÃO CIENTE',
+        
+        // Defeitos
+        defects: State.defects,
+        
+        // Timer
+        tempo_total_seg: ReviewState.tempo_total_seg
+    };
+}
+
+/**
+ * ⚠️ USADO APENAS NO SUBMIT: Mapeia dados brutos para modelo canônico (ÚNICA VERDADE)
+ * 
+ * Esta função é chamada EXCLUSIVAMENTE em FormManager.handleSubmit()
+ * para garantir que apenas nomes canônicos sejam enviados ao backend.
+ * 
+ * Fora do submit, use FormManager.collectFormData() que mantém compatibilidade legada.
+ */
+function mapToCanonicalReview(raw) {
+    const toFloat = v => {
+        if (v === null || v === undefined || v === '') return 0;
+        const n = parseFloat(String(v).replace(',', '.'));
+        return isNaN(n) ? 0 : n;
+    };
+
+    // GARANTIR que localizacao vem de loc (campo do QR)
+    const localizacao = raw.localizacao || raw.loc || '';
+    const revised_meters_valor = raw.revised_meters || raw.metros_revisado || 0;
+
+    console.log('[CANONICAL] RAW DATA RECEBIDO:', {
+        defects_count: (raw.defects || []).length,
+        sup_product_id: raw.sup_product_id,
+        revised_meters: revised_meters_valor,
+        metros_revisado: raw.metros_revisado,
+        localizacao_raw: raw.localizacao,
+        loc_raw: raw.loc,
+        localizacao_final: localizacao,
+        est_tc: raw.est_tc,
+        len: raw.len,
+        wid: raw.wid
+    });
+    
+    // 🔍 DEBUG: Log detalhado para garantir que loc está vindo
+    console.log('[CANONICAL] LOCALIZACAO SOURCE CHAIN:',
+        'raw.localizacao=' + raw.localizacao,
+        '|| raw.loc=' + raw.loc,
+        '|| fallback=empty',
+        '= FINAL: ' + localizacao
+    );
+
+    // Determinar tipo de tecido PRIMEIRO para aplicar fallbacks corretos
+    const isMalha = raw.est_tc === 'tc_malha';
+    
+    // Para PLANO: se revised_meters for 0 (usuário não preencheu), usa wid como fallback
+    let metrosRevisados = toFloat(revised_meters_valor);
+    if (!isMalha && (!metrosRevisados || metrosRevisados === 0)) {
+        metrosRevisados = toFloat(raw.wid) || 0;  // Fallback: usa meters_supplier do QR
+        console.log('[CANONICAL] ⚠️ revised_meters estava vazio, usando wid como fallback:', metrosRevisados);
+    }
+
+    // Calcular área - usa apenas valores revisados (largura em cm × metros)
+    // NOTA: revised_meters = metros revisados (altura do rolo)
+    // NOTA: len = largura em cm (do QR)
+    const larguraEmCm = toFloat(raw.len) || 0;
+    const area_m2 = larguraEmCm && metrosRevisados 
+        ? Number(((larguraEmCm / 100) * metrosRevisados).toFixed(2))
+        : 0;
+
+    // Determinar valores do fornecedor conforme tipo de tecido
+    const larguraFornecedor = toFloat(raw.len) || 0;      // LARGURA FORNECEDOR (cm) - sempre existe
+    let metrosFornecedor = 0;    // METROS FORNECEDOR - apenas para tecido plano
+    let pesoFornecedor = 0;       // PESO FORNECEDOR - apenas para malha
+    
+    if (isMalha) {
+      // Para malha: wid contém peso em kg
+      pesoFornecedor = toFloat(raw.wid) || 0;
+      metrosFornecedor = 0; // não se aplica para malha
+    } else {
+      // Para tecido plano: wid contém metros
+      metrosFornecedor = toFloat(raw.wid) || 0;
+      pesoFornecedor = toFloat(raw.supplier_weight) || 0; // peso opcional para plano
+    }
+
+    // Calcular total de pontos
+    const total_pontos = (typeof DefectManager !== 'undefined' && DefectManager.getTotalPoints) 
+        ? DefectManager.getTotalPoints() : 0;
+
+    // Mapear defeitos para formato canônico
+    const defeitos = (raw.defects || []).map(d => ({
+        tipo: d.tipo || d.nome_defeito || '',
+        metro_inicial: toFloat(d.metro_inicial),
+        metro_final: toFloat(d.metro_final),
+        posicao_largura: Array.isArray(d.posicao_largura) 
+            ? d.posicao_largura 
+            : (d.posicao_largura ? String(d.posicao_largura).split(',').map(s => s.trim()) : []),
+        gravidade: d.gravidade || '',
+        foto_url: d.foto_url || '',
+        foto_id: d.foto_id || '',
+        observacoes: d.observacoes || '',
+        criado_em: d.criado_em || ''
+    }));
+
+    // Retornar modelo canônico (ÚNICA VERDADE)
+    return {
+        rolo: {
+            // IDs canônicos
+            review_id: raw.review_id,
+            roll_id: raw.roll_id,
+            revision_id: raw.review_id,
+            id_do_rolo: raw.roll_id,
+            
+            // REVISOR
+            revisor_nome: raw.revisor_nome || sel('resp', 'responsavel', 'revisor') || '',
+            
+            // FORNECEDOR
+            supplier_id: raw.supplier_id || '',
+            supplier_nm: raw.supplier_nm || '',
+            fornecedor_id: raw.supplier_id || '',
+            fornecedor_nome: raw.supplier_nm || '',
+            
+            // NOTA FISCAL
+            nf: raw.nf || '',
+            nota_fiscal: raw.nf || '',
+            
+            // PRODUTO
+            product_id: raw.product_id || raw.sup_product_id || '',
+            produto_id: raw.product_id || raw.sup_product_id || '',
+            
+            // PRODUTO_SUP_ID
+            sup_product_id: raw.sup_product_id || '',
+            produto_sup_id: raw.sup_product_id || '',
+            
+            // LOTE
+            lot: raw.lot || '',
+            lote: raw.lot || '',
+            
+            // COR
+            color_id: raw.color_id || '',
+            cor: raw.color_id || '',
+            
+            // LOCALIZACAO (CRÍTICO! Agora com fallback duplo)
+            loc: localizacao,
+            localizacao: localizacao,
+            
+            // ESTRUTURA
+            est_tc: raw.est_tc || '',
+            estrutura_tecido: raw.est_tc || '',
+            
+            // TIPO TECIDO
+            tipo_tecido: isMalha ? 'MALHA' : 'PLANO',
+            
+            // LARGURA
+            len: larguraEmCm,
+            largura_cm: larguraEmCm,
+            
+            // METROS REVISADOS (CRÍTICO! Sem fallback para zero)
+            metros_revisado: isMalha ? 0 : metrosRevisados,
+            revised_meters: isMalha ? 0 : metrosRevisados,
+            
+            // PESO
+            peso_kg: isMalha ? pesoFornecedor : 0,
+            
+            // METROS FORNECEDOR
+            wid: toFloat(raw.wid) || 0,
+            metros_fornecedor: toFloat(raw.wid) || 0,
+            
+            // AREA
+            area_m2: isMalha ? 0 : area_m2,
+            
+            // OUTROS
+            fabric_pattern: raw.fabric_pattern || '',
+            padronagem: raw.fabric_pattern || '',
+            comp: raw.comp || '',
+            composicao: raw.comp || '',
+            
+            // STATUS
+            status_rolo: raw.status_rolo || '',
+            status_final: raw.status_rolo || '',
+            observacoes: raw.observacoes || '',
+            declaracao: raw.declaracao || 'NÃO CIENTE',
+            
+            // TEMPO E PONTOS
+            tempo_total_seg: raw.tempo_total_seg || 0,
+            total_pontos: total_pontos
+        },
+        
+        defeitos: defeitos,
+        
+        fotos: (typeof DefectManager !== 'undefined') 
+            ? DefectManager.getUploadedPhotos().map(f => ({ 
+                foto_url: String(f), 
+                review_id: raw.review_id 
+            })) 
+            : [],
+        
+        tempos: (typeof TimerAudit !== 'undefined') ? TimerAudit.getLogs() : []
+    };
+}
+
+// =========================================================================
+// 9. FORM MANAGER
+// =========================================================================
+const FormManager = {
+    _setFormEnabled(enabled) {
+      const root = UI.getEl('mainForm') || document;
+      const submitBtn = UI.getEl('submitBtn');
+
+      const controls = root.querySelectorAll('input, select, textarea, button');
+      controls.forEach(el => {
+        if (el.id === 'btnClearForm' || el.id === 'btnPreview') return;
+        el.disabled = !enabled;
+      });
+
+      if (submitBtn) {
+        submitBtn.disabled = !enabled;
+        submitBtn.innerText = enabled ? 'Enviar RRT' : 'Processando...';
+      }
+    },
+
+    validateRequiredFields(){
+      // ❗️Política: APENAS product_id (Código do Produto) bloqueia o envio.
+      // Este é o campo crítico de controle - sem ele, não há rastreamento possível.
+      const productIdEl = UI.getEl('product_id');
+      const productIdCheck = Validation.validateRequired(productIdEl, 'Código do Produto');
+      
+      if (!productIdCheck.valid) {
+        console.error('[VALIDATION] ❌ BLOQUEIO: Código do Produto é obrigatório');
+        UI.showToast('❌ Código do Produto é obrigatório para o rastreamento', '#ef4444');
+        return { valid: false, error: 'Código do Produto é obrigatório' };
+      }
+
+      // Campos que geram AVISO mas NÃO BLOQUEIAM
+      const warnList = [
+        {id:'loc', name:'Localização'},
+        {id:'revised_meters', name:'Metros (Revisado)'},
+        {id:'color_id', name:'Cor'}
+      ];
+
+      const emptyFields = [];
+
+      warnList.forEach(f => {
+        const el = UI.getEl(f.id);
+        const v = Validation.validateRequired(el, f.name);
+        if (!v.valid) {
+          console.warn('[VALIDATION] ⚠️ Campo vazio (permitido): ' + f.name + ' (id=' + f.id + ')');
+          emptyFields.push(f.name);
+        }
+      });
+
+      if (emptyFields.length > 0) {
+        UI.showToast('⚠️ Campos vazios: ' + emptyFields.join(', ') + '. O envio seguirá mesmo assim.', '#f59e0b');
+      }
+
+      const decl = UI.getEl('declaracao_checkbox');
+      if (!decl || !decl.checked) {
+        console.warn('[VALIDATION] ⚠️ Termo de ciência não marcado (permitido)');
+      }
+
+      if (!review_id) {
+        console.warn('[VALIDATION] ⚠️ review_id vazio (permitido) — envio seguirá mesmo assim');
+      }
+
+      console.log('[VALIDATION] ✅ Envio permitido (product_id validado).');
+      return { valid: true };
+    },
+
+    collectFormData(){
+      // COLETA LEGADA COMPLETA (mantida para compatibilidade)
+      // Esta função deve retornar TODOS os campos que existiam antes
+      const get=id=>{ const el=UI.getEl(id); return el?String(el.value||'').trim():''; };
+      const toFloat=v=>{ const n=parseFloat(String(v||'').replace(',','.')); return isNaN(n)?null:n; };
+      
+      // Consolidar rastreamento de tempo
+      const timerAuditLogs = (typeof TimerAudit !== 'undefined' && TimerAudit.getLogs) ? TimerAudit.getLogs() : [];
+      const tempoInicio = timerAuditLogs.find(e => e.event === 'START_REVIEW');
+      const tempoFim = timerAuditLogs.find(e => e.event === 'END_REVIEW');
+      const pausas = timerAuditLogs.filter(e => e.event === 'PAUSE' || e.event === 'RESUME');
+      
+      const collectedData={
+        // IDs (compatibilidade legada + canônico)
+        id_do_rolo: roll_id,
+        review_id: review_id,
+        roll_id: roll_id,
+        
+        // Revisor (múltiplos nomes para compatibilidade)
+        revisor: sel('resp', 'responsavel', 'revisor'),
+        responsavel: sel('resp', 'responsavel', 'revisor'),
+        revisor_nome: sel('resp', 'responsavel', 'revisor'),
+        resp: get('resp'),
+        
+        // Fornecedor (múltiplos nomes)
+        product_id: get('product_id'),
+        supplier_id: get('supplier_id'),
+        supplier_name: get('supplier_nm'),
+        supplier_nm: get('supplier_nm'),
+        fornecedor: get('supplier_nm'),
+        fornecedor_id: get('supplier_id'),
+        fornecedor_nome: get('supplier_nm'),
+        
+        // Identificação (múltiplos nomes)
+        sup_product_id: get('sup_product_id'),
+        nf: get('nf'),
+        nota_fiscal: get('nf'),
+        lot: get('lot'),
+        lote: get('lot'),
+        
+        // Estrutura / Tipo de Tecido (CRÍTICO para Sheets)
+        est_tc: get('est_tc'),
+        estrutura_tecido: get('est_tc'),
+        tipo_tecido: get('est_tc') === 'tc_malha' ? 'MALHA' : (get('est_tc') === 'tc_plano' ? 'PLANO' : ''),
+        
+        // Medidas (múltiplos nomes) - MAPEAMENTO CORRETO
+        revised_len: toFloat(get('revised_len')),
+        len: toFloat(get('len')),
+        largura_cm: toFloat(get('revised_len') || get('len')),  // Largura em cm
+        revised_meters: toFloat(get('revised_meters')),
+        metros_revisados: toFloat(get('revised_meters')),
+        metros_revisado: toFloat(get('revised_meters')),  // Para Sheets
+        meters_supplier: toFloat(get('wid') || get('revised_meters')),
+        supplier_weight: toFloat(get('supplier_weight')),
+        peso_kg: toFloat(get('supplier_weight')),  // Para Sheets - MALHA
+        peso_fornecedor: toFloat(get('supplier_weight')),
+        wid: toFloat(get('wid')),
+        
+        // Outros campos
+        color_id: get('color_id'),
+        cor: get('color_id'),
+        fabric_pattern: get('fabric_pattern'),
+        localizacao: get('loc'),
+        comp: get('comp'),
+        composicao: get('comp'),
+        
+        // Status
+        status_rolo: get('status_rolo'),
+        status_final: get('status_rolo'),  // Para Sheets (WorkflowService)
+        declaracao: UI.getEl('declaracao_checkbox')?.checked?'CIENTE':'NÃO CIENTE',
+        observacoes: get('observacoes'),
+        
+        // Defeitos (formato legado completo)
+        defects: State.defects.map(d=>({
+          id: d.id,
+          tipo: d.tipo||d.nome_defeito||'',
+          nome_defeito: d.tipo||d.nome_defeito||'',
+          metro_inicial: toFloat(d.metro_inicial) || d.metro_inicial || '',
+          metro_final: toFloat(d.metro_final) || d.metro_final || '',
+          posicao_largura: Array.isArray(d.posicao_largura)?d.posicao_largura:(d.posicao_largura?String(d.posicao_largura).split(',').map(s=>s.trim()):[]),
+          gravidade: d.gravidade||'',
+          observacoes: d.observacoes||d.obs||'',
+          obs: d.observacoes||d.obs||'',
+          filename: d.filename||'',
+          foto_id: d.foto_id||'',
+          foto_url: d.foto_url||'',
+          criado_em: d.criado_em||''
+        })),
+        
+        // ⏱️ RASTREAMENTO COMPLETO DE TEMPO
+        tempo_total_seg: ReviewState.tempo_total_seg,
+        reviewTimerSeconds: ReviewState.tempo_total_seg,
+        tempo_inicio: tempoInicio ? tempoInicio.timestamp : new Date().toISOString(),
+        tempo_fim: tempoFim ? tempoFim.timestamp : new Date().toISOString(),
+        tempo_pausas: pausas.length > 0 ? pausas.map(p => ({ evento: p.event, timestamp: p.timestamp })) : [],
+        tempo_total_minutos: Math.round(ReviewState.tempo_total_seg / 60),
+        tempo_audit_logs: timerAuditLogs,  // Para debug/auditoria
+        
+        // Pontos
+        total_pontos: (typeof DefectManager !== 'undefined' && DefectManager.getTotalPoints) 
+            ? DefectManager.getTotalPoints() : 0
+      };
+      
+      // 🔍 DEBUG: Verificar campos críticos coletados
+      console.log('[FORM_COLLECTION] Campos críticos coletados:', {
+        loc_input: get('loc'),
+        localizacao_field: collectedData.localizacao,
+        revised_meters_input: get('revised_meters'),
+        metros_revisado_field: collectedData.metros_revisado,
+        est_tc: collectedData.est_tc,
+        len: collectedData.len,
+        wid: collectedData.wid,
+        supplier_weight: collectedData.supplier_weight
+      });
+      
+      return collectedData;
+    },
+
+
+
+    async handleSubmit() {
+    console.log('[FORM] SUBMIT_START | review_id=', review_id || '(VAZIO)');
+    
+    UI.setLoaderManagedExternally(true); 
+    this._setFormEnabled(false); 
+    UI.showLoader(true); 
+    UI.setProgress(5);
+
+    try {
+        // 1. Validação
+        const v = this.validateRequiredFields();
+        if (!v.valid) { 
+            UI.showToast(v.error, '#ef4444'); 
+            throw new Error('Falha na validação: ' + (v.field || 'campo obrigatório')); 
+        }
+
+        // 2. ⏱️ Finalizar cronômetro e GARANTIR END_REVIEW seja logado
+        if (typeof finalizeTimer === 'function') {
+            finalizeTimer();  // This logs END_REVIEW and pauses if still running
+        }
+        if (typeof stopReviewTimer === 'function') {
+            stopReviewTimer();  // Then stop the interval
+        }
+
+        // 2.5. Coletar dados brutos para definir roll_id (necessário para upload de fotos)
+        const raw = collectRawFormData();
+        if (!roll_id && raw.product_id) {
+            roll_id = String(raw.product_id).trim();
+            console.log('[FORM] roll_id definido a partir do formulário:', roll_id);
+        }
+
+        UI.setProgress(20);
+        UI.showToast('Enviando fotos...');
+        
+        // 3. Upload de Fotos (Aguardando conclusão)
+        if (typeof DefectManager !== 'undefined') {
+            await DefectManager.uploadAllPhotos();
+        }
+        
+        UI.setProgress(50);
+
+        // 4. Mapear para canônico APENAS no submit
+        const canonical = mapToCanonicalReview(raw);
+        
+        UI.showToast('Gravando no servidor...');
+        
+        // 🔍 DEBUG: Log da estrutura final que será enviada ao servidor
+        console.log('[FORM] CANONICAL ROLO FINAL ANTES DO ENVIO:', {
+            localizacao: canonical.rolo.localizacao,
+            loc: canonical.rolo.loc,
+            metros_revisado: canonical.rolo.metros_revisado,
+            revised_meters: canonical.rolo.revised_meters,
+            tipo_tecido: canonical.rolo.tipo_tecido,
+            est_tc: canonical.rolo.est_tc,
+            len: canonical.rolo.len,
+            wid: canonical.rolo.wid,
+            peso_kg: canonical.rolo.peso_kg
+        });
+        
+        console.log('[FORM] SEND_TO_SERVER_START (CANÔNICO)', canonical);
+
+        // 5. Chamada ao Servidor (APENAS formato canônico)
+        const insertResult = await Server.saveStructuredData(canonical);
+
+        UI.setProgress(90);
+        
+        // Verificação robusta de sucesso
+        if (insertResult && (insertResult.status === 'SUCESSO' || insertResult.success === true)) {
+            UI.showToast('Relatório salvo com sucesso!', '#10b981');
+            UI.setProgress(100);
+            console.log('[FLOW] ✅ SUCESSO TOTAL');
+            
+            // Pequeno delay para o usuário ver o 100%
+            setTimeout(() => {
+                if (this.reset) this.reset();
+                // Removido window.location.reload() - causa tela branca
+            }, 1500);
+
+        } else {
+          const errMsg = insertResult?.message || insertResult?.error || insertResult?.mensagem || 'O servidor recusou os dados (Erro de Chave Estrangeira)';
+          throw new Error(errMsg);
+        }
+
+    } catch (e) {
+        console.error('[FORM] SUBMIT_ERROR |', e);
+        UI.showToast(e.message || 'Erro desconhecido', '#ef4444');
+        this._setFormEnabled(true);
+    } finally {
+        UI.setLoaderManagedExternally(false);
+        UI.showLoader(false);
+        UI.setProgress(0);
+    }
+},
+
+    reset(){
+  try{ stopReviewTimer(); }catch(e){ console.warn('stopReviewTimer failed', e); }
+
+  // ✅ OTIMIZADO: Remover listeners (evita memory leak)
+  try {
+    ListenerTracker.removeAll();
+  } catch(e) { console.warn('ListenerTracker cleanup failed', e); }
+
+  // ✅ OTIMIZADO: Limpar caches e observers para liberar memória
+  try {
+    if (typeof DefectManager !== 'undefined') {
+      DefectManager._renderCache.clear();
+      if (DefectManager._imageObserver) {
+        DefectManager._imageObserver.disconnect();
+        DefectManager._imageObserver = null;
+      }
+    }
+  } catch(e) { console.warn('DefectManager cleanup failed', e); }
+  
+  try {
+    FileHandler.clearCache();
+  } catch(e) { console.warn('FileHandler cleanup failed', e); }
+
+  try{
+    const f = ElementCache.mainForm;
+    if(f && typeof f.reset === 'function') f.reset();
+  }catch(err){
+    console.error('[FORM] reset() failed',err);
+  }
+
+  try{ if(typeof window !== 'undefined') window.RRT_ROLL_ID = null; }catch(e){}
+  roll_id = null;
+  review_id = null;
+  ReviewState.pending_qr_data = null;
+  revisor_nome = null;
+
+  [
+    'resp','responsavel','supplier_nm','supplier_id','nf','product_id','sup_product_id',
+    'lot','codigo_linx','lote','numero_peca','referencia','cor','tipo_tecido',
+    'loc','wid','len','cresetomp','revised_meters','revised_len',
+    'supplier_weight','status_rolo','observacoes'
+  ].forEach(id=>{
+    const el = UI.getEl(id);
+    if(el) el.value='';
+  });
+
+  const decl = UI.getEl('declaracao_checkbox');
+  if(decl) decl.checked=false;
+
+  State.clearDefects();
+  DefectManager.render();
+  if(typeof resetZoneSelector==='function') resetZoneSelector();
+
+  const startOverlay = ElementCache.startOverlay;
+  if(startOverlay) startOverlay.style.display='flex';
+
+  const btnScanQr = ElementCache.btnScanQr;
+  if(btnScanQr) btnScanQr.style.display='inline-block';
+
+  const reviewStatusEl = UI.getEl('reviewStatus');
+  if(reviewStatusEl) reviewStatusEl.hidden = true;
+
+  // 🟢 AGORA SIM: deixa o formulário pronto pro próximo uso
+  this._setFormEnabled(true);
+
+  UI.showToast('Formulário limpo. Pronto para novo scan.','#10b981');
+  console.log('[FLOW] Ciclo finalizado. UI resetada para o próximo rolo.');
+ } 
+};
+
+// =========================================================================
+// 10. APP INIT & ZONE SELECTOR
+// =========================================================================
+function initializeZoneSelector() {
+  const selectElement = UI.getEl('input_posicao_largura');
+  const zoneButtons = document.querySelectorAll('.zone-model-visual .zone-button');
+  if(!selectElement || zoneButtons.length === 0) return;
+  
+  function syncSelectToButtons() {
+    const selected = Array.from(selectElement.options)
+      .filter(o => o.selected)
+      .map(o => o.value);
+    zoneButtons.forEach(btn => {
+      const v = btn.getAttribute('data-value');
+      btn.classList.toggle('active', selected.includes(v));
+    });
+  }
+  
+  function syncButtonsToSelect() {
+    const selectedValues = Array.from(zoneButtons)
+      .filter(b => b.classList.contains('active'))
+      .map(b => b.getAttribute('data-value'));
+    Array.from(selectElement.options).forEach(opt => {
+      opt.selected = selectedValues.includes(opt.value);
+    });
+    selectElement.dispatchEvent(new Event('change'));
+  }
+  
+  zoneButtons.forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.preventDefault();
+      btn.classList.toggle('active');
+      syncButtonsToSelect();
+    });
+  });
+  
+  syncSelectToButtons();
+}
+
+function resetZoneSelector() {
+  const selectElement = UI.getEl('input_posicao_largura');
+  const zoneButtons = document.querySelectorAll('.zone-model-visual .zone-button');
+  if(selectElement) {
+    Array.from(selectElement.options).forEach(opt => opt.selected = false);
+    selectElement.dispatchEvent(new Event('change'));
+  }
+  zoneButtons.forEach(btn => btn.classList.remove('active'));
+}
+
+const App = {
+    async checkActiveRoll(){
+      if(!Server.isAvailable()){ console.log('[ROLL] Apps Script não disponível'); return; }
+      try{
+        console.log('[ROLL] Verificando rolo ativo...');
+        const elResp = UI.getEl('resp');
+        const revisor = elResp && elResp.selectedIndex > 0 ? elResp.options[elResp.selectedIndex].text : 'Revisor Teste';
+        const response = await Server.checkActiveRoll(revisor);
+        if(response?.has_active_roll){
+          console.log(`[ROLL] Rolo ativo: ${response.roll_id}`);
+          this.showRollBlocker(response.roll_id,response.roll_phase);
+
+          // Se houver dados do rolo, aplicar ao formulário
+          const rollData = response.roll_data || response.data || response.payload || null;
+          if(rollData){ try{ this.applyQrDataToForm(rollData); this.lockPrefilledFields(); }catch(e){ console.error('[UI_STATE] apply data failed',e); } }
+
+          // Atualizar IDs e revisor que abriu (CANÔNICO)
+          const newId = response.roll_id || response.id_do_rolo || response.id || null;
+          if(newId){ 
+            review_id = response.review_id;   // ID DA REVISÃO
+            roll_id   = response.roll_id;     // ID DO ROLO (produto)
+            console.log('[UI_STATE] IDs atualizados (rolo ativo recuperado):', newId);
+          }
+          revisor_nome = response.opened_by || response.revisor || response.revisorNome || revisor_nome;
+          console.log('[UI_STATE] Revisor que abriu o rolo:', revisor_nome);
+
+          // Habilitar formulário e iniciar timer
+          FormManager._setFormEnabled(true);
+          let initialSeconds = 0;
+          if(response && typeof response.elapsed_seconds === 'number') initialSeconds = response.elapsed_seconds;
+          else if(response && response.elapsed_seconds){ const n = Number(response.elapsed_seconds); if(!isNaN(n)) initialSeconds = n; }
+          else if(response && response.started_at){ const started = new Date(response.started_at); if(!isNaN(started)) initialSeconds = Math.floor((Date.now() - started.getTime())/1000); }
+          try{ 
+            console.log('[UI_STATE] Recuperando rolo ativo, iniciando timer com:', initialSeconds, 'segundos');
+          }catch(e){ console.error('[UI_STATE] ERRO ao iniciar timer do rolo recuperado:',e); }
+
+          return true;
+        } else{
+          console.log('[UI_STATE] Nenhum rolo ativo encontrado ao recarregar');
+          return false;
+        }
+      }catch(e){ console.error('[SERVER_COMM] ERRO ao verificar rolo ativo:',e); return false; }
+    },
+
+    showRollBlocker(rollId, phase){
+        const existing=document.getElementById('roll-blocker'); if(existing) existing.remove();
+        const blocker=document.createElement('div'); blocker.id='roll-blocker';
+        blocker.style.cssText=`position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.75);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:10000;backdrop-filter:blur(4px)`;
+        const content=document.createElement('div'); content.style.cssText=`background:white;border-radius:12px;padding:40px 30px;text-align:center;max-width:400px;box-shadow:0 20px 60px rgba(0,0,0,.3)`;
+        content.innerHTML=`<div style="font-size:48px;margin-bottom:16px">⏳</div><h2 style="margin:0 0 12px 0;color:#222;font-size:20px">Rolo em Processamento</h2><p style="margin:0 0 8px 0;color:#666;font-size:14px">ID do Rolo: <strong>${rollId}</strong></p><p style="margin:0 0 20px 0;color:#666;font-size:13px">Fase: <strong>${phase}</strong></p><p style="margin:0;color:#999;font-size:13px">Aguarde a finalização do rolo atual antes de registrar um novo.<br>Recarregue a página para atualizar o status.</p><button onclick="window.location.reload()" style="margin-top:24px;padding:12px 24px;background:#0077ff;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;font-size:14px">🔄 Atualizar</button>`;
+        blocker.appendChild(content); document.body.appendChild(blocker);
+    },
+
+    async initializeRRT(parsedQrData) {
+  if (review_id) {
+    console.log('[FLOW] ⚠️ review_id já definido. Abortando inicialização duplicada.');
+    return;
+  }
+  if (!Server.isAvailable()) {
+    console.log('[SERVER_COMM] ⚠️ Servidor não disponível. Abortando.');
+    return;
+  }
+
+  console.log('[FLOW] ========== INICIANDO RRT ==========');
+  console.log('[FLOW] parsedQrData recebido:', JSON.stringify(parsedQrData).substring(0, 150) + '...');
+
+  UI.showLoader(true);
+  FormManager._setFormEnabled(false);
+
+  try {
+    const revisorNome =
+      (parsedQrData && parsedQrData.revisorNome) ||
+      sel('resp', 'responsavel', 'revisor') ||
+      'Revisor Teste';
+
+    const qrPayload = (parsedQrData && parsedQrData.qrData) || parsedQrData || null;
+
+    console.log('[FLOW] Disparando Server.initializeRoll({ revisorNome, qrData })');
+    const response = await Server.initializeRoll({ revisorNome, qrData: qrPayload });
+
+    console.log('[SERVER_COMM] Resposta bruta do servidor:', JSON.stringify(response));
+
+    // ✅ AGORA O SUCESSO DEPENDE DO review_id (NÃO do roll_id)
+    if (response.status === 'SUCESSO' && response.review_id) {
+
+      console.log('[SERVER_COMM] ✅ SUCESSO: review_id =', response.review_id, '| roll_id =', response.roll_id);
+
+      // 🔑 IDs canônicos
+      review_id = response.review_id;
+      roll_id   = response.roll_id || null;
+
+      if (typeof window !== 'undefined') {
+        window.RRT_REVIEW_ID = review_id;
+        window.RRT_ROLL_ID = roll_id;
+      }
+
+      // Só preenche campo de rolo se existir
+      const idEl = UI.getEl('id_do_rolo');
+      if (idEl && roll_id) idEl.value = String(roll_id);
+
+      UI.showToast('✅ Revisão iniciada com ID: ' + review_id, '#22c55e');
+
+      // ✨ LIBERA O FORMULÁRIO
+      FormManager._setFormEnabled(true);
+
+      revisor_nome =
+        response.opened_by ||
+        response.revisorNome ||
+        response.revisor ||
+        revisorNome ||
+        null;
+
+      console.log('[FLOW] revisor_nome definido como:', revisor_nome);
+
+      // -------- UI de status --------
+      const reviewStatusEl = UI.getEl('reviewStatus');
+      console.log('[DEBUG_UI] reviewStatusEl encontrado?', !!reviewStatusEl);
+      if (reviewStatusEl) {
+        console.log('[DEBUG_UI] reviewStatusEl.hidden antes:', reviewStatusEl.hidden);
+        reviewStatusEl.hidden = false;
+        reviewStatusEl.style.display = 'flex';
+        console.log('[DEBUG_UI] reviewStatusEl.hidden depois:', reviewStatusEl.hidden);
+        console.log('[DEBUG_UI] reviewStatusEl.style.display:', reviewStatusEl.style.display);
+      }
+
+      const statusLabel = UI.getEl('statusLabel');
+      if (statusLabel) statusLabel.textContent = 'REVISÃO EM ANDAMENTO';
+
+      const statusIndicator = UI.getEl('statusIndicator');
+      if (statusIndicator) statusIndicator.style.color = '#28a745';
+
+      const reviewTimerEl = UI.getEl('reviewTimer');
+      console.log('[DEBUG_UI] reviewTimerEl encontrado?', !!reviewTimerEl);
+      if (reviewTimerEl) {
+        reviewTimerEl.style.display = 'inline-block';
+        console.log('[DEBUG_UI] reviewTimerEl.textContent inicial:', reviewTimerEl.textContent);
+      }
+
+      // -------- TIMER --------
+      console.log('[FLOW]  Iniciando cronômetro...');
+      try {
+        let initialSeconds = 0;
+
+        if (typeof response.elapsed_seconds === 'number') {
+          initialSeconds = response.elapsed_seconds;
+        } else if (response.started_at) {
+          const started = new Date(response.started_at);
+          if (!isNaN(started)) {
+            initialSeconds = Math.floor((Date.now() - started.getTime()) / 1000);
+          }
+        }
+
+        console.log('[DEBUG_TIMER] Chamando startReviewTimer com', initialSeconds, 'segundos');
+        startReviewTimer(initialSeconds);
+        TimerAudit.log('START_REVIEW');
+        console.log('[UI_STATE] ⏱️ Timer iniciado com', initialSeconds, 'segundos');
+        console.log('[DEBUG_TIMER] ReviewState.timer_state após start:', ReviewState.timer_state);
+        console.log('[DEBUG_TIMER] ReviewState.interval após start:', ReviewState.interval);
+      } catch (e) {
+        console.error('[UI_STATE] ERRO ao iniciar timer:', e);
+        console.error('[UI_STATE] Stack:', e.stack);
+      }
+
+      // -------- LIMPEZA VISUAL --------
+      const btnScanQr = UI.getEl('btnScanQr');
+      if (btnScanQr) btnScanQr.style.display = 'none';
+
+      const startOverlay = UI.getEl('startOverlay');
+      if (startOverlay) { startOverlay.style.display = 'none'; console.log('[UI_STATE] startOverlay ocultado'); }
+
+      console.log('[FLOW] ========== RRT INICIALIZADO COM SUCESSO ==========');
+
+    } else {
+      const errMsg = response.message || 'Falha ao iniciar revisão - resposta inválida do servidor';
+      console.error('[SERVER_COMM] ❌ ERRO: Resposta inválida:', response);
+      throw new Error(errMsg);
+    }
+
+  } catch (e) {
+    console.error('[SERVER_COMM] ❌ ERRO CRÍTICO ao inicializar RRT:', e.message);
+    console.error('[SERVER_COMM] Stack:', e.stack);
+    UI.showToast('❌ Erro: ' + (e.message || 'desconhecido'), '#ef4444');
+
+    // Reset canônico em caso de falha
+    review_id = null;
+    roll_id = null;
+
+  } finally {
+    UI.showLoader(false);
+    console.log('[FLOW] showLoader(false) - UI liberada');
+  }
+},
+
+    async init() {
+      const blocked = await this.checkActiveRoll();
+      initializeZoneSelector();
+      const btnScanQr = UI.getEl('btnScanQr');
+      
+      // Elementos do formulário
+      const selTipo = UI.getEl('input_tipo_select');
+      const txtTipo = UI.getEl('input_tipo_text');
+      const mi = UI.getEl('input_mi');
+      const mf = UI.getEl('input_mf');
+      const file = UI.getEl('input_file');
+      const zoneEl = UI.getEl('input_posicao_largura');
+      const gravityEl = UI.getEl('input_gravidade');
+      
+      // Botões de ação
+      const addBtn = UI.getEl('addDefectBtn');
+      const clearDefsBtn = UI.getEl('clearDefectsBtn');
+      const submitBtn = UI.getEl('submitBtn');
+      const clearFormBtn = UI.getEl('btnClearForm');
+      const previewBtn = UI.getEl('btnPreview');
+      const toggleButton = UI.getEl('toggleTheme');
+
+      // Listener: Tipo de defeito
+      if(selTipo && txtTipo) {
+        selTipo.addEventListener('change', () => {
+          const v = String(selTipo.value || '').toLowerCase();
+          const isOther = v === '__outro__' || v === '__outro__';
+          txtTipo.style.display = isOther ? 'block' : 'none';
+          if(isOther) txtTipo.focus();
+          else txtTipo.value = '';
+        });
+      }
+      
+      // Listener: Adicionar defeito
+      if(addBtn) {
+        addBtn.addEventListener('click', () => {
+          DefectManager.handleAddDefect(selTipo, txtTipo, mi, mf, file, zoneEl, gravityEl);
+        });
+      }
+      
+      // Listener: Limpar defeitos
+      if(clearDefsBtn) {
+        clearDefsBtn.addEventListener('click', () => {
+          if(!State.defects.length) {
+            UI.showToast('Nenhum defeito', '#f59e0b');
+            return;
+          }
+          if(confirm('Remover todos os defeitos?')) {
+            State.clearDefects();
+            DefectManager.render();
+            UI.showToast('Lista limpa');
+          }
+        });
+      }
+      
+      // Listener: Submit do formulário
+      const mainForm = UI.getEl('mainForm');
+      if(mainForm) {
+        mainForm.addEventListener('submit', e => {
+          e.preventDefault();
+          FormManager.handleSubmit();
+        });
+      }
+      
+      // Listener: Botão enviar
+      if(submitBtn) {
+        submitBtn.addEventListener('click', () => {
+          FormManager.handleSubmit();
+        });
+      }
+      
+      // Listener: Limpar formulário
+      if(clearFormBtn) {
+        clearFormBtn.addEventListener('click', () => {
+          if(confirm('Limpar formulário?')) {
+            FormManager.reset();
+            UI.showToast('Formulário limpo');
+          }
+        });
+      }
+      
+      // Listener: Preview
+      if(previewBtn) {
+        previewBtn.addEventListener('click', () => {
+          FormManager.showPreview();
+        });
+      }
+      
+        const btnManualEntry = UI.getEl('btnManualEntry');
+        if(btnManualEntry) {
+          btnManualEntry.addEventListener('click', (e) => {
+            e.preventDefault();
+            console.log('[MANUAL_BTN] Clique em btnManualEntry');
+            handleManualEntryMode();
+          });
+        } else {
+          console.warn('[INIT] btnManualEntry não encontrado no DOM');
+        }
+
+      // Listener: Toggle tema
+      if(toggleButton) {
+        toggleButton.addEventListener('click', toggleTheme);
+      }
+
+      // =========================================================================
+      // Event listeners do select "resp" + botões QR/Manual
+      // =========================================================================
+      const respSelect = UI.getEl('resp');
+      if(respSelect){ 
+        respSelect.addEventListener('change', async () => {
+          const newSel = sel('resp', 'responsavel', 'revisor');
+          console.log('[SELECT_CHANGE] Revisor selecionado:', newSel);
+          
+          // Se já houver rolo aberto, validar coincidência
+          if(roll_id && revisor_nome && newSel !== revisor_nome){
+            if(!confirm('O revisor selecionado difere de quem iniciou o RRT. Deseja continuar?')){
+              // Restaurar seleção anterior
+              respSelect.value = respSelect.dataset.previousValue || '';
+              return;
+            } else { 
+              revisor_nome = newSel; 
+            }
+          }
+          
+          // Se há QR data pendente, inicializar agora
+          if (!roll_id && newSel && ReviewState.pending_qr_data) {
+            console.log('[FLOW] Revisor selecionado com QR data pendente. Inicializando...');
+            try {
+              await App.initializeRRT({ 
+                revisorNome: newSel, 
+                qrData: ReviewState.pending_qr_data 
+              });
+              ReviewState.pending_qr_data = null;
+            } catch (e) {
+              console.error('[SELECT_CHANGE] Erro ao inicializar:', e);
+              UI.showToast('Erro: ' + e.message, '#ef4444');
+            }
+          }
+          
+          respSelect.dataset.previousValue = newSel;
+        }); 
+      }
+
+      // =========================================================================
+      // EVENTO: Botão Escanear QR Code
+      // =========================================================================
+      if(btnScanQr) {
+        btnScanQr.addEventListener('click', async (e) => {
+          e.preventDefault();
+          console.log('[DEBUG_QR] 🔘 Clique em btnScanQr');
+          console.log('[DEBUG_QR] Estado atual - review_id:', review_id);
+          
+          try {
+            console.log('[DEBUG_QR] Chamando handleQrScanFlow...');
+            await App.handleQrScanFlow();
+            console.log('[DEBUG_QR] ✅ handleQrScanFlow concluído');
+          } catch (error) {
+            console.error('[DEBUG_QR] ❌ Erro no handleQrScanFlow:', error);
+            console.error('[DEBUG_QR] Stack:', error.stack);
+            UI.showToast('Erro ao processar QR: ' + error.message, '#ef4444');
+          }
+        });
+      }
+
+      const btnPause = UI.getEl('btnPauseReview');
+      if (btnPause) {
+        btnPause.addEventListener('click', onPauseResumeClick);
+      }
+
+      // Confirm ao voltar para o menu caso exista roll_id
+      // Seleciona tanto .btn.btn-ghost (padrão legado) quanto .back-btn (back button do reviewer.html)
+      Array.from(document.querySelectorAll('a.btn.btn-ghost, a.back-btn')).forEach(a=>{
+        try{ 
+          const isBackBtn = a.classList.contains('back-btn');
+          const textMatch = a.textContent && a.textContent.includes('Voltar ao menu');
+          if(isBackBtn || textMatch){
+            a.addEventListener('click', ev=>{
+              if(roll_id){ 
+                if(!confirm('Existe uma revisão em andamento. Tem certeza que deseja sair e perder o progresso?')){ 
+                  ev.preventDefault(); 
+                } 
+              }
+            });
+          }
+        }catch(e){}
+      });
+
+      DefectManager.render();
+    },
+
+  async handleQrScanFlow(){
+    console.log('[QR_SCAN] 🚀 Iniciando handleQrScanFlow no App');
+    
+    try {
+      // Verificar se já existe uma revisão em andamento
+      if (review_id) {
+        console.log('[QR_SCAN] ⚠️ Já existe uma revisão ativa. Abortando.');
+        UI.showToast('Já existe uma revisão em andamento', '#f59e0b');
+        return;
+      }
+
+      // Verificar se o responsável foi selecionado
+      const respSelect = UI.getEl('resp');
+      const selectedRevisor = respSelect && respSelect.selectedIndex > 0 ? respSelect.options[respSelect.selectedIndex].text : null;
+      
+      console.log('[QR_SCAN] 👤 Revisor selecionado:', selectedRevisor);
+      
+      if (!selectedRevisor || selectedRevisor === 'Selecionar') {
+        console.log('[QR_SCAN] ❌ Nenhum revisor selecionado');
+        UI.showToast('Por favor, selecione um responsável antes de escanear o QR Code', '#ef4444');
+        return;
+      }
+
+      // Solicitar ao usuário para escanear o QR Code
+      console.log('[QR_SCAN] 📷 Solicitando leitura do QR Code via câmera');
+      
+      let qrInput;
+      
+      try {
+        await ensureReviewerScannerLoaded();
+        // Tentar usar a câmera primeiro
+        qrInput = await scanQrFromCamera();
+        console.log('[QR_SCAN] ✅ QR Code capturado via câmera');
+      } catch (cameraError) {
+        let errorMsg = 'Câmera não disponível';
+        switch (cameraError.name) {
+          case 'NotAllowedError':
+          case 'PermissionDeniedError':
+            errorMsg = 'Você bloqueou o acesso à câmera. Permita em configurações do navegador.';
+            break;
+          case 'NotFoundError':
+          case 'DevicesNotFoundError':
+            errorMsg = 'Nenhuma câmera encontrada no dispositivo.';
+            break;
+          case 'NotReadableError':
+          case 'TrackStartError':
+            errorMsg = 'A câmera está em uso por outro aplicativo. Feche e tente novamente.';
+            break;
+          case 'OverconstrainedError':
+          case 'ConstraintNotSatisfiedError':
+            errorMsg = 'Câmera não atende aos requisitos técnicos mínimos.';
+            break;
+          case 'TypeError':
+            errorMsg = 'Navegador não suporta acesso à câmera.';
+            break;
+          default:
+            if (cameraError.message.includes('CDN') || cameraError.message.includes('CORS')) {
+              errorMsg = 'Falha ao carregar bibliotecas QR (CORS/CDN bloqueado).';
+            } else if (cameraError.message.includes('Timeout')) {
+              errorMsg = 'Timeout ao carregar scanner. Tente novamente.';
+            } else if (cameraError.message.includes('Cancelado')) {
+              errorMsg = 'Leitura de QR cancelada.';
+              return;
+            }
+        }
+
+        console.error('[QR_SCAN] 💥 Falha ao abrir scanner QR:', cameraError);
+        UI.showToast(`⚠️ ${errorMsg} Use o botão “Preencher Manualmente” se necessário.`, '#f59e0b');
+        return;
+      }
+
+      console.log('[QR_SCAN] 📝 QR Code recebido:', qrInput.substring(0, 50) + '...');
+
+      // Parse do QR Code (tolerante)
+      const parsedQrData = this.parseQrPayload(qrInput);
+      if (parsedQrData) {
+        console.log('[QR_SCAN] ✅ QR Code parseado com sucesso:', parsedQrData);
+      } else {
+        console.warn('[QR_SCAN] ⚠️ QR lido, mas sem mapeamento completo de campos. Seguindo com inicialização.');
+      }
+
+      // Preparar dados para inicialização
+      const payload = {
+        revisorNome: selectedRevisor,
+        qrData: parsedQrData || qrInput
+      };
+
+      console.log('[QR_SCAN] 🔄 Chamando initializeRRT com payload:', payload);
+
+      // Produção: preenche imediatamente para não depender do backend.
+      if (parsedQrData) {
+        this.applyQrDataToForm(parsedQrData);
+        this.lockPrefilledFields();
+      }
+
+      // Inicializar a revisão
+      await this.initializeRRT(payload);
+
+      // ✅ AGORA: Preencher campos apenas se payload for reconhecido
+      if (parsedQrData) {
+        console.log('[QR_SCAN] 📝 Preenchendo campos do formulário...');
+        this.applyQrDataToForm(parsedQrData);
+        this.lockPrefilledFields();
+      } else {
+        UI.showToast('QR lido. Complete os campos que não foram reconhecidos.', '#f59e0b');
+      }
+      
+      console.log('[QR_SCAN] 🎉 Fluxo de QR Code concluído com sucesso');
+      
+    } catch (error) {
+      console.error('[QR_SCAN] 💥 ERRO no handleQrScanFlow:', error);
+      console.error('[QR_SCAN] 📋 Stack trace:', error.stack);
+      
+      // Se o erro for relacionado a falta de revisor, armazenar QR data para uso posterior
+      if (error.message && error.message.includes('Revisor inválido')) {
+        console.log('[QR_SCAN] 💾 Armazenando QR data para uso posterior');
+        ReviewState.pending_qr_data = qrInput;
+        UI.showToast('Selecione um responsável para continuar', '#f59e0b');
+      } else {
+        UI.showToast('Erro ao processar QR Code: ' + error.message, '#ef4444');
+      }
+      
+      throw error;
+    }
+  },
+
+  parseQrPayload(raw){
+    console.log('[QR_PARSE] 📊 Iniciando parse de QR:', raw.substring(0, 100) + (raw.length > 100 ? '...' : ''));
+    
+    const text = String(raw || '').replace(/[\u200B-\u200D\uFEFF]/g, '').trim();
+    if (!text) {
+      console.warn('[QR_PARSE] ❌ QR vazio');
+      return null;
+    }
+
+    const normalizeKey = (k) => String(k || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '_')
+      .replace(/^_+|_+$/g, '');
+
+    const aliasToCanonical = {
+      supplier_id: ['supplier_id', 'fornecedor_id', 'id_fornecedor', 'idfornecedor', 'id_forn', 'forn_id'],
+      supplier_name: ['supplier_name', 'supplier_nm', 'fornecedor', 'fornecedor_nome', 'nome_fornecedor', 'forn_nome'],
+      nf: ['nf', 'nota_fiscal', 'nota', 'nota_fiscal_numero'],
+      product_id: ['product_id', 'produto_id', 'codigo_produto', 'cod_produto', 'cod_prod', 'produto'],
+      lot: ['lot', 'lote', 'lote_id'],
+      sup_product_id: ['sup_product_id', 'produto_sup_id', 'supplier_product_id', 'produto_fornecedor_id'],
+      color_id: ['color_id', 'cor', 'color', 'cor_id'],
+      fabric_pattern: ['fabric_pattern', 'padronagem', 'pattern', 'desenho'],
+      loc: ['loc', 'localizacao', 'local', 'endereco', 'rua', 'posicao'],
+      meters_supplier: ['meters_supplier', 'metros_fornecedor', 'metros', 'metragem', 'wid'],
+      wid: ['wid', 'largura', 'len', 'largura_cm'],
+      comp: ['comp', 'composicao', 'composition']
+    };
+
+    const canonicalByAlias = Object.create(null);
+    Object.keys(aliasToCanonical).forEach((canonical) => {
+      aliasToCanonical[canonical].forEach((alias) => {
+        canonicalByAlias[normalizeKey(alias)] = canonical;
+      });
+    });
+
+    const numberFrom = (value) => {
+      const normalized = String(value || '')
+        .replace(/\s/g, '')
+        .replace(',', '.')
+        .replace(/[^0-9.-]/g, '');
+      const parsed = parseFloat(normalized);
+      return Number.isFinite(parsed) ? parsed : 0;
+    };
+
+    const buildCanonical = (payload = {}) => {
+      const normalizedPayload = {};
+      Object.keys(payload || {}).forEach((k) => {
+        const canonicalKey = canonicalByAlias[normalizeKey(k)] || normalizeKey(k);
+        if (canonicalKey && normalizedPayload[canonicalKey] === undefined) {
+          normalizedPayload[canonicalKey] = payload[k];
+        }
+      });
+
+      const data = {
+        supplier_id: normalizedPayload.supplier_id || '',
+        supplier_name: normalizedPayload.supplier_name || '',
+        nf: normalizedPayload.nf || '',
+        product_id: normalizedPayload.product_id || '',
+        lot: normalizedPayload.lot || '',
+        sup_product_id: normalizedPayload.sup_product_id || '',
+        color_id: normalizedPayload.color_id || '',
+        fabric_pattern: normalizedPayload.fabric_pattern || '',
+        loc: normalizedPayload.loc || '',
+        meters_supplier: numberFrom(normalizedPayload.meters_supplier),
+        wid: numberFrom(normalizedPayload.wid),
+        comp: normalizedPayload.comp || ''
+      };
+
+      const hasMinimum = Object.values(data).some(v => String(v || '').trim() !== '' && String(v || '') !== '0');
+      return hasMinimum ? data : null;
+    };
+
+    // 1) JSON
+    if ((text.startsWith('{') && text.endsWith('}')) || (text.startsWith('[') && text.endsWith(']'))) {
+      try {
+        console.log('[QR_PARSE] 🔍 Tentando formato JSON...');
+        const parsedJson = JSON.parse(text);
+        if (Array.isArray(parsedJson) && parsedJson.length >= 11) {
+          const parts = parsedJson.map(v => String(v || '').trim());
+          const result = {
+            supplier_id: parts[0] || '',
+            supplier_name: parts[1] || '',
+            nf: parts[2] || '',
+            product_id: parts[3] || '',
+            lot: parts[4] || '',
+            sup_product_id: parts[5] || '',
+            color_id: parts[6] || '',
+            fabric_pattern: parts[7] || '',
+            loc: parts[8] || '',
+            meters_supplier: numberFrom(parts[9]),
+            wid: numberFrom(parts[10]),
+            comp: parts.slice(11).join(' ').trim()
+          };
+          console.log('[QR_PARSE] ✅ JSON array parseado com sucesso');
+          return result;
+        }
+
+        const canonicalFromJson = buildCanonical(parsedJson || {});
+        if (canonicalFromJson) {
+          console.log('[QR_PARSE] ✅ JSON object parseado com sucesso');
+          return canonicalFromJson;
+        }
+      } catch (e) {
+        console.warn('[QR_PARSE] ⚠️ Falha ao parsear JSON:', e.message);
+      }
+    }
+
+    // 2) URL com query params
+    if (/^https?:\/\//i.test(text)) {
+      try {
+        console.log('[QR_PARSE] 🔍 Tentando formato URL...');
+        const url = new URL(text);
+        const params = Object.fromEntries(url.searchParams.entries());
+        const canonicalFromUrl = buildCanonical(params);
+        if (canonicalFromUrl) {
+          console.log('[QR_PARSE] ✅ URL parseada com sucesso');
+          return canonicalFromUrl;
+        }
+      } catch (e) {
+        console.warn('[QR_PARSE] ⚠️ Falha ao parsear URL:', e.message);
+      }
+    }
+
+    // 3) key=value / key:value em linhas
+    if (/[:=]/.test(text) && /\r?\n/.test(text)) {
+      console.log('[QR_PARSE] 🔍 Tentando formato key=value multilinhas...');
+      const kv = {};
+      text.split(/\r?\n/).forEach(line => {
+        const trimmed = String(line || '').trim();
+        if (!trimmed) return;
+        const separatorIndex = trimmed.includes(':') ? trimmed.indexOf(':') : trimmed.indexOf('=');
+        if (separatorIndex <= 0) return;
+        const key = trimmed.slice(0, separatorIndex).trim().toLowerCase().replace(/\s+/g, '_');
+        const value = trimmed.slice(separatorIndex + 1).trim();
+        if (key) kv[key] = value;
+      });
+      const canonicalFromKv = buildCanonical(kv);
+      if (canonicalFromKv) {
+        console.log('[QR_PARSE] ✅ Key=value parseado com sucesso');
+        return canonicalFromKv;
+      }
+    }
+
+    // 3.1) key=value / key:value em linha única (separado por ; | ou quebra)
+    if (/[:=]/.test(text)) {
+      console.log('[QR_PARSE] 🔍 Tentando formato key=value inline...');
+      const kv = {};
+      const chunks = text.split(/[;|\n\r]+/).map(s => String(s || '').trim()).filter(Boolean);
+      chunks.forEach((chunk) => {
+        const idxColon = chunk.indexOf(':');
+        const idxEq = chunk.indexOf('=');
+        const sep = (idxColon >= 0 && idxEq >= 0) ? Math.min(idxColon, idxEq) : Math.max(idxColon, idxEq);
+        if (sep <= 0) return;
+        const rawKey = chunk.slice(0, sep).trim();
+        const rawValue = chunk.slice(sep + 1).trim();
+        if (!rawKey || !rawValue) return;
+        kv[rawKey] = rawValue;
+      });
+
+      const canonicalFromInlineKv = buildCanonical(kv);
+      if (canonicalFromInlineKv) {
+        console.log('[QR_PARSE] ✅ Key=value inline parseado com sucesso');
+        return canonicalFromInlineKv;
+      }
+    }
+
+    // 4) formato posicional legado
+    console.log('[QR_PARSE] 🔍 Tentando formato posicional legado...');
+    const bySemicolon = text.split(';').map(p => p.trim()).filter(Boolean);
+    const byPipe = text.split('|').map(p => p.trim()).filter(Boolean);
+    const byLine = text.split(/\r?\n/).map(p => p.trim()).filter(Boolean);
+
+    let parts = bySemicolon;
+    if (parts.length < 12 && byPipe.length >= 8) parts = byPipe;
+    if (parts.length < 12 && byLine.length >= 8) parts = byLine;
+    if (parts.length < 8) {
+      console.error('[QR_PARSE] ❌ Nenhum formato reconhecido. Partes detectadas:', {
+        semicolon: bySemicolon.length,
+        pipe: byPipe.length,
+        lines: byLine.length
+      });
+      return null;
+    }
+
+    const comp = parts.slice(11).join(' ').trim();
+
+    const result = {
+      supplier_id: parts[0] || '',
+      supplier_name: parts[1] || '',
+      nf: parts[2] || '',
+      product_id: parts[3] || '',
+      lot: parts[4] || '',
+      sup_product_id: parts[5] || '',
+      color_id: parts[6] || '',
+      fabric_pattern: parts[7] || '',
+      loc: parts[8] || '',
+      meters_supplier: numberFrom(parts[9]),
+      wid: numberFrom(parts[10]),
+      comp: comp || ''
+    };
+    
+    console.log('[QR_PARSE] ✅ Formato posicional parseado com sucesso:', result);
+    return result;
+  },
+
+  applyQrDataToForm(data){
+    console.log('[UI_STATE] 📝 Aplicando QR payload ao formulário:', data);
+    
+    if (!data || typeof data !== 'object') {
+      console.error('[UI_STATE] ❌ Dados QR inválidos para aplicar ao formulário');
+      return;
+    }
+
+    // Campos que serão preenchidos e seu mapeamento
+    const mapping = {
+      supplier_id: 'supplier_id',
+      supplier_name: 'supplier_nm',
+      supplier_nm: 'supplier_nm',
+      nf: 'nf',
+      product_id: 'product_id',
+      lot: 'lot',
+      sup_product_id: 'sup_product_id',
+      color_id: 'color_id',
+      fabric_pattern: 'fabric_pattern',
+      loc: 'loc',
+      wid: 'wid',
+      len: 'len',
+      comp: 'comp'
+    };
+
+    let preenchidos = 0;
+
+    // Aplicar campos mapeados
+    Object.entries(mapping).forEach(([qrField, formFieldId]) => {
+      if (!data.hasOwnProperty(qrField)) return;
+      
+      const el = UI.getEl(formFieldId);
+      if (!el) {
+        console.warn(`[UI_STATE] ⚠️ Campo ${formFieldId} não encontrado no DOM`);
+        return;
+      }
+
+      const value = String(data[qrField] || '').trim();
+      if (value === '' || value === '0') {
+        console.log(`[UI_STATE] ⏭️ Campo ${formFieldId} vazio, pulando`);
+        return;
+      }
+
+      try {
+        el.value = value;
+        el.setAttribute('data-prefilled', 'true');
+        console.log(`[UI_STATE] ✅ ${formFieldId} = "${value.substring(0, 30)}${value.length > 30 ? '...' : ''}"`);
+        preenchidos++;
+      } catch (e) {
+        console.error(`[UI_STATE] ❌ Erro ao preencher ${formFieldId}:`, e);
+      }
+    });
+
+    // Tratamento especial para metros_supplier → priority: meters_supplier > wid
+    if (data.meters_supplier != null && data.meters_supplier !== 0 && data.meters_supplier !== '') {
+      const metersEl = UI.getEl('meters_supplier');
+      if (metersEl) {
+        const v = String(data.meters_supplier).trim();
+        if (v !== '' && v !== '0') {
+          try {
+            metersEl.value = v;
+            metersEl.setAttribute('data-prefilled', 'true');
+            console.log(`[UI_STATE] ✅ meters_supplier = "${v}"`);
+            preenchidos++;
+          } catch (e) {
+            console.error('[UI_STATE] ❌ Erro ao preencher meters_supplier:', e);
+          }
+        }
+      } else {
+        // Fallback: se não existe meters_supplier, tenta usar wid como storage alternativo
+        const widEl = UI.getEl('wid');
+        if (widEl && !String(widEl.value || '').trim()) {
+          const v = String(data.meters_supplier).trim();
+          if (v !== '' && v !== '0') {
+            try {
+              widEl.value = v;
+              widEl.setAttribute('data-prefilled', 'true');
+              console.log(`[UI_STATE] ⚠️ meters_supplier → wid (fallback) = "${v}"`);
+              preenchidos++;
+            } catch (e) {
+              console.error('[UI_STATE] ❌ Erro ao preencher wid (fallback):', e);
+            }
+          }
+        }
+      }
+    }
+
+    console.log(`[UI_STATE] 📊 Resultado: ${preenchidos} campos preenchidos`);
+
+    // Esconder overlay de início assim que o QR for aplicado
+    const startOverlay = UI.getEl('startOverlay');
+    if (startOverlay) { 
+      startOverlay.style.display = 'none'; 
+      console.log('[UI_STATE] ✅ startOverlay ocultado'); 
+    }
+  },
+
+  lockPrefilledFields(){
+    [
+      'supplier_id',
+      'supplier_nm',
+      'nf',
+      'product_id',
+      'lot',
+      'sup_product_id',
+      'color_id',
+      'fabric_pattern',
+      'loc',
+      'wid',
+      'len',
+      'comp',
+      'est_tc'
+    ].forEach(id=>{
+      const el = UI.getEl(id);
+      if (!el) return;
+
+      if (el.getAttribute('data-prefilled') === 'true') {
+        const value = String(el.value || '').trim();
+        if (value !== '') {
+          // Campos preenchidos pelo QR agora permanecem editáveis
+          // para corrigir inconsistências dos dados do TOTVS MODA
+          el.readOnly = false;
+          el.disabled = false;
+          el.classList.add('prefilled'); // mantém indicação visual de que veio do QR
+        } else {
+          // Se veio vazio pelo QR, libera edição
+          el.readOnly = false;
+          el.disabled = false;
+          el.classList.remove('prefilled');
+          el.removeAttribute('data-prefilled');
+        }
+      }
+    });
+  },
+
+  /**
+   * =========================================================================
+   * MÉTODO: handleQrScanResult
+   * =========================================================================
+   * Processa dados de QR lido via callback global.
+   * Complementa o fluxo async de scanQrFromCamera().
+   */
+  async handleQrScanResult(qrData){
+    console.log('[QR_CALLBACK] 📲 handleQrScanResult recebeu dados:', qrData.substring(0, 50) + '...');
+    
+    try {
+      // Validação básica
+      if (!qrData || typeof qrData !== 'string') {
+        console.error('[QR_CALLBACK] ❌ Dados inválidos recebidos');
+        UI.showToast('Erro: Dados de QR inválidos', '#ef4444');
+        return;
+      }
+
+      // Se já existe uma revisão ativa, não processa
+      if (review_id) {
+        console.warn('[QR_CALLBACK] ⚠️ Já existe revisão ativa');
+        UI.showToast('Já existe uma revisão em andamento', '#f59e0b');
+        return;
+      }
+
+      // Parse do QR
+      const parsedData = this.parseQrPayload(qrData);
+      if (parsedData) {
+        console.log('[QR_CALLBACK] ✅ QR parseado com sucesso');
+        // Aplica dados ao formulário
+        this.applyQrDataToForm(parsedData);
+        this.lockPrefilledFields();
+        UI.showToast('✅ QR lido e campos preenchidos', '#10b981');
+      } else {
+        console.warn('[QR_CALLBACK] ⚠️ QR lido mas sem mapeamento completo');
+        UI.showToast('QR lido. Complete os campos não reconhecidos.', '#f59e0b');
+      }
+    } catch (error) {
+      console.error('[QR_CALLBACK] 💥 Erro ao processar QR:', error);
+      UI.showToast('Erro ao processar QR: ' + error.message, '#ef4444');
+    }
+  }
+};
+
+// =========================================================================
+// 13. FUNÇÕES GLOBAIS (FORA DO OBJETO APP)
+// =========================================================================
+
+// Função global para handleQrScanFlow (compatibilidade)
+async function handleQrScanFlow(){
+  console.log('[QR_SCAN] 🌐 Chamando função global handleQrScanFlow');
+  return await App.handleQrScanFlow();
+}
+
+// Função global para modo manual
+function handleManualEntryMode(){
+  console.log('[MANUAL_ENTRY] 🚀 Iniciando modo de entrada manual');
+  
+  try {
+    // Verificar se já existe uma revisão em andamento
+    if (review_id) {
+      console.log('[MANUAL_ENTRY] ⚠️ Já existe uma revisão ativa. Abortando.');
+      UI.showToast('Já existe uma revisão em andamento', '#f59e0b');
+      return;
+    }
+
+    // Verificar se o responsável foi selecionado
+    const respSelect = UI.getEl('resp');
+    const selectedRevisor = respSelect && respSelect.selectedIndex > 0 ? respSelect.options[respSelect.selectedIndex].text : null;
+    
+    console.log('[MANUAL_ENTRY] 👤 Revisor selecionado:', selectedRevisor);
+    
+    if (!selectedRevisor || selectedRevisor === 'Selecionar') {
+      console.log('[MANUAL_ENTRY] ❌ Nenhum revisor selecionado');
+      UI.showToast('Por favor, selecione um responsável antes de preencher manualmente', '#ef4444');
+      return;
+    }
+
+    const payload = { revisorNome: selectedRevisor, qrData: null };
+    console.log('[MANUAL_ENTRY] 🔄 Chamando initializeRRT em modo manual:', payload);
+
+    // No modo manual não há QR/rolo físico para bloquear a abertura da revisão.
+    App.initializeRRT(payload).then(() => {
+      console.log('[MANUAL_ENTRY] 🎉 Modo manual iniciado com sucesso');
+      UI.showToast('Modo manual ativado. Preencha os dados do formulário.', '#22c55e');
+      document.body.classList.add('manual-mode');
+    }).catch(error => {
+      console.error('[MANUAL_ENTRY] 💥 ERRO ao iniciar modo manual:', error);
+      console.error('[MANUAL_ENTRY] 📋 Stack trace:', error.stack);
+      UI.showToast('Erro ao iniciar modo manual: ' + error.message, '#ef4444');
+    });
+
+  } catch (error) {
+    console.error('[MANUAL_ENTRY] 💥 ERRO no handleManualEntryMode:', error);
+    UI.showToast('Erro ao iniciar modo manual: ' + error.message, '#ef4444');
+  }
+}
+
+// =========================================================================
+// 11. THEME
+// =========================================================================
+const THEME_KEY='themePreference';
+function toggleTheme(){ const isDark=document.body.classList.toggle('dark'); localStorage.setItem(THEME_KEY,isDark?'dark':'light'); }
+function loadTheme(){ const saved=localStorage.getItem(THEME_KEY)||'light'; if(saved==='dark') document.body.classList.add('dark'); }
+
+// =========================================================================
+// 12. DOM READY (ALINHADO COM ReviewState)
+// =========================================================================
+document.addEventListener('DOMContentLoaded', () => {
+  // ✅ OTIMIZADO: Inicializar cache de elementos primeiro
+  ElementCache.init();
+  
+  if (typeof loadTheme === 'function') { loadTheme(); }
+
+  // -----------------------------------------------------------------------
+  // 1. Garantir referência principal sem clonar DOM (mais leve em mobile)
+  // -----------------------------------------------------------------------
+  if (!document.getElementById('mainForm')) {
+    try {
+      const wrap =
+        document.querySelector('.wrap[role="main"]') ||
+        document.querySelector('.wrap');
+
+      if (wrap) {
+        wrap.id = 'mainForm';
+      }
+    } catch (err) {
+      console.error('[FORM] MAIN_FORM_CREATE_ERROR |', err);
+    }
+  }
+
+  // -----------------------------------------------------------------------
+  // 2. Inicialização principal da aplicação
+  // -----------------------------------------------------------------------
+  if (typeof App !== 'undefined' && App.init) {
+    App.init();
+  } else {
+    console.warn('[APP] App.init não encontrado');
+  }
+
+  // -----------------------------------------------------------------------
+  // 3. Consolidação segura do DefectManager
+  // -----------------------------------------------------------------------
+  if (typeof window.DefectManager !== 'undefined') {
+    // ✅ OTIMIZADO: Inicializar observer global para imagens
+    DefectManager.initImageObserver();
+    
+    DefectManager.getTotalPoints = function () {
+      if (typeof State === 'undefined' || !Array.isArray(State.defects)) {
+        return 0;
+      }
+
+      return State.defects.reduce((acc, d) => {
+        const p = parseInt(d.gravidade);
+        return acc + (isNaN(p) ? 0 : p);
+      }, 0);
+    };
+  } else {
+    console.warn('[DEFECT] DefectManager não encontrado');
+  }
+
+  // -----------------------------------------------------------------------
+  // 4. Fallback seguro de Timer (telemetria)
+  // -----------------------------------------------------------------------
+  if (typeof window.Timer === 'undefined') {
+    window.Timer = {
+      getEventLogs: () => [
+        {
+          event: 'LOG_SISTEMA',
+          timestamp: new Date().toISOString(),
+          msg: 'Timer nativo não detectado, usando log de fallback'
+        }
+      ]
+    };
+  }
+
+  // -----------------------------------------------------------------------
+  // 5. Estado inicial da UI (SEM alterar estado lógico)
+  // -----------------------------------------------------------------------
+  UI.updateTimerDisplay(ReviewState.tempo_total_seg);
+  UI.togglePauseButton(false);
+
+  // -----------------------------------------------------------------------
+  // 6. Event listener para mudança no tipo de tecido
+  // -----------------------------------------------------------------------
+  const est_tc = UI.getEl('est_tc');
+  if (est_tc) {
+    est_tc.addEventListener('change', updateMeasureFieldsByFabricType);
+    updateMeasureFieldsByFabricType();
+  }
+
+  console.log('[SISTEMA] ✅ DOM pronto e alinhado com ReviewState');
+});
+
+// =========================================================================
+// 12+1. HANDLER DO BOTÃO PAUSAR / RETOMAR
+// =========================================================================
+
+function onPauseResumeClick() {
+  console.log('[DEBUG_PAUSE] onPauseResumeClick chamado');
+  console.log('[DEBUG_PAUSE] ReviewState.timer_state atual:', ReviewState.timer_state);
+  
+  if (ReviewState.timer_state === TIMER_STATE.RUNNING) {
+    console.log('[DEBUG_PAUSE]  Pausando timer...');
+    pauseReviewTimer();
+    UI.togglePauseButton(true);
+    UI.showToast('Revisão pausada', '#f59e0b');
+  } else if (ReviewState.timer_state === TIMER_STATE.PAUSED) {
+    console.log('[DEBUG_PAUSE] ▶️ Retomando timer...');
+    resumeReviewTimer();
+    UI.togglePauseButton(false);
+    UI.showToast('Revisão retomada');
+  } else {
+    console.warn('[DEBUG_PAUSE] ⚠️ Estado do timer inesperado:', ReviewState.timer_state);
+  }
+  
+  console.log('[DEBUG_PAUSE] ReviewState.timer_state após ação:', ReviewState.timer_state);
+}
+
+// =========================================================================
+// 11.5. GESTÃO DE TIPO DE TECIDO (PLANO VS MALHA)
+// =========================================================================
+function updateMeasureFieldsByFabricType() {
+  const est_tc = UI.getEl('est_tc');
+  const wid_label = UI.getEl('wid_label');
+  const wid_input = UI.getEl('wid');
+  const supplier_weight_container = UI.getEl('supplier_weight')?.parentElement;
+  
+  if (!est_tc || !wid_label || !wid_input) return;
+  
+  const isMalha = est_tc.value === 'tc_malha';
+  
+  // Ajustar label do campo wid
+  if (isMalha) {
+    wid_label.textContent = 'Peso (Fornecedor) kg *';
+    wid_input.setAttribute('step', '0.01');
+    wid_input.setAttribute('placeholder', 'Ex: 15.50');
+    
+    // Esconder campo de peso separado (já estamos usando wid para peso)
+    if (supplier_weight_container) {
+      supplier_weight_container.style.display = 'none';
+    }
+  } else {
+    // Tecido plano
+    wid_label.textContent = 'Metros (Fornecedor) *';
+    wid_input.setAttribute('step', '0.01');
+    wid_input.setAttribute('placeholder', 'Ex: 150.00');
+    
+    // Mostrar campo de peso separado (opcional para tecidos planos)
+    if (supplier_weight_container) {
+      supplier_weight_container.style.display = 'block';
+    }
+  }
+  
+  console.log('[TECIDO] Tipo:', isMalha ? 'Malha' : 'Plano', '| Campo ajustado para:', wid_label.textContent);
+}
+
+// =========================================================================
+// =========================================================================
+// 11.6. QR CODE SCANNER COM CÂMERA (LAZY-LOAD)
+// =========================================================================
+// Alterado o nome da constante local para evitar colisão de escopo
+const formattedBaseUrl = String(window.APP_BASE_URL || window.__APP_URL__ || '').replace(/\/$/, '');
+const REVIEWER_SCANNER_SRC = null; // Scanner já está embutido no HTML
+let reviewerScannerLoadPromise = null;
+
+function ensureReviewerScannerLoaded() {
+  if (typeof scanQrFromCamera === 'function') return Promise.resolve();
+  if (reviewerScannerLoadPromise) return reviewerScannerLoadPromise;
+
+  return Promise.reject(new Error('Scanner QR não está disponível para carregamento dinâmico.'));
+}
+
+// ========================================================= //
+// OFFLINE MODE INTEGRATION
+// ========================================================= //
+
+// Initialize Service Worker (disabled for Apps Script host)
+const isAppsScriptHost = location.hostname.includes('script.googleusercontent.com') || location.hostname.includes('script.google.com');
+if (!isAppsScriptHost && 'serviceWorker' in navigator) {
+  window.addEventListener('load', async () => {
+    try {
+      const registration = await navigator.serviceWorker.register('/service-worker.js', {
+        scope: '/'
+      });
+      console.log('[OFFLINE] ✅ Service Worker registered:', registration);
+    } catch (error) {
+      console.warn('[OFFLINE] ⚠️ Service Worker registration failed:', error);
+    }
+  });
+
+  // Message handler from Service Worker
+  navigator.serviceWorker.addEventListener('message', (event) => {
+    const { type, data } = event.data;
+    if (type === 'SYNC_COMPLETE') {
+      console.log('[OFFLINE] ✅ Sync completed:', data.count, 'items');
+      showToast(`✅ ${data.count} item(ns) sincronizado(s) com sucesso`);
+    }
+  });
+} else if (isAppsScriptHost) {
+  console.warn('[OFFLINE] ⚠️ Service Worker desabilitado no host Apps Script');
+} else {
+  console.warn('[OFFLINE] ⚠️ Service Workers not supported');
+}
+
+// Update offline status indicator
+function updateOfflineStatus() {
+  const offlineStatus = document.getElementById('offline-status');
+  const isOnline = navigator.onLine;
+  
+  if (!offlineStatus) return;
+  
+  if (!isOnline && window.OfflineManager) {
+    offlineStatus.style.display = 'flex';
+    const queueLength = window.OfflineManager.getQueueLength?.() || 0;
+    const queueElement = document.getElementById('offline-queue-count');
+    if (queueElement) {
+      queueElement.textContent = `${queueLength} itens na fila`;
+    }
+  } else {
+    offlineStatus.style.display = 'none';
+  }
+}
+
+// Listen for online/offline events
+window.addEventListener('online', () => {
+  console.log('[OFFLINE] 🟢 Back online');
+  updateOfflineStatus();
+  
+  // Trigger sync
+  if (window.OfflineManager) {
+    window.OfflineManager.syncQueue();
+  }
+});
+
+window.addEventListener('offline', () => {
+  console.log('[OFFLINE] 🔴 Went offline');
+  updateOfflineStatus();
+  showToast('📡 Você está offline. Os dados serão sincronizados automaticamente quando reconectar.');
+});
+
+// Check status on page load
+window.addEventListener('load', updateOfflineStatus);
+</script>

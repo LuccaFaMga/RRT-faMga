@@ -1,54 +1,101 @@
 /* ============================================================
- * Config.gs — Versão Produção (Ultra Clean) — v2.1 (Ajustes de LogApp)
- * Estrutura organizada e robusta.
+ * Config.gs — Versão Produção (Ultra Clean) — v3.0 (Secure)
+ * Credenciais migradas para PropertiesService para segurança.
  * ============================================================ */
 
 /* -------------------------------------------------------------
- * CONFIGURAÇÕES DO SISTEMA
+ * CARREGAMENTO SEGURO DE CONFIGURAÇÃO
  * ----------------------------------------------------------- */
+function loadConfigFromProperties() {
+    const props = PropertiesService.getScriptProperties();
+    
+    // Valores padrão (apenas para desenvolvimento - NÃO usar em produção)
+    const defaults = {
+        // Email
+        EMAIL_COMPRAS: "quantumindchanel@gmail.com",
+        EMAIL_ADMIN: "rrtlogsfa@outlook.com",
+        EMAIL_SUPERVISOR: "quantumindchanel@gmail.com",
+        SENDER_NAME: "Sistema de Revisão de Tecidos - Fa Maringa",
+        
+        // Pessoas
+        SUPERVISOR_NOME: "Mateus Camargo Pereira da Silva",
+        
+        // URLs
+        SUPERVISOR_APP_URL: "https://script.google.com/macros/s/AKfycbxuml0qIiuRVDJKMxk0RnwgfWytor6Dz7aJ9c56Yze2sAiiHGOkjqo1MmaQJ_Fy4NG5/exec",
+        APPROVAL_FORM_BASE: "https://docs.google.com/forms/d/e/1FAIpQLScZZX.../viewform?usp=pp_url",
+        
+        // Drive IDs
+        TEMPLATE_RELATORIO_ID: "1yYOJC8yHLXaLGb8xhH-CiRjoc1NsFHZ7nP4fuifByZw",
+        TEMPLATE_FOTOS_ID: "1yYOJC8yHLXaLGb8xhH-CiRjoc1NsFHZ7nP4fuifByZw",
+        OUTPUT_FOLDER_ID: "1kFYjgACWaHMchJfIidz-0Jl05nYC4t7E",
+        LOGO_FILE_ID: "10fbU-7wBE7dlu-1RzdIbendCaCMEgltf",
+        SHEET_ID: "1OgUSZSCBh54DUfuy8nvUYB2QZ2IR2o3UjUdnU2Gwj3E",
+        
+        // Forms
+        FORM_ENTRY_ROLO: "entry.817202283",
+        FORM_ENTRY_SUP: "entry.445468771",
+        FORM_ENTRY_DEC: "entry.2142081778",
+        
+        // Settings
+        LOG_EXTREMO: "true",
+        GENERATE_ID: "true",
+        SECRET_KEY: Utilities.getUuid() // Gera chave única por
+    };
+    
+    // Carrega de PropertiesService ou usa defaults
+    const config = {};
+    Object.keys(defaults).forEach(key => {
+        const value = props.getProperty(key);
+        config[key] = value !== null ? value : defaults[key];
+    });
+    
+    // Converte strings para tipos apropriados
+    config.LOG_EXTREMO = config.LOG_EXTREMO === "true";
+    config.GENERATE_ID = config.GENERATE_ID === "true";
+    
+    return config;
+}
+
 const CONFIG_VALUES = {
     /* 2. LOGS */
-    LOG_EXTREMO: true,
+    LOG_EXTREMO: loadConfigFromProperties().LOG_EXTREMO,
 
     /* 3. E-MAIL */
     EMAIL: {
-        COMPRAS: "quantumindchanel@gmail.com",
-        ADMIN: "rrtlogsfa@outlook.com",
-        SUPERVISOR: "quantumindchanel@gmail.com",
-        SENDER_NAME: "Sistema de Revisão de Tecidos - Fa Maringa"
+        COMPRAS: loadConfigFromProperties().EMAIL_COMPRAS,
+        ADMIN: loadConfigFromProperties().EMAIL_ADMIN,
+        SUPERVISOR: loadConfigFromProperties().EMAIL_SUPERVISOR,
+        SENDER_NAME: loadConfigFromProperties().SENDER_NAME
     },
 
-    SUPERVISOR_NOME: "Mateus Camargo Pereira da Silva",
+    SUPERVISOR_NOME: loadConfigFromProperties().SUPERVISOR_NOME,
 
     /* 4. URLs da WebApp */
     URL: {
-        SUPERVISOR_APP:
-            "https://script.google.com/macros/s/AKfycbxuml0qIiuRVDJKMxk0RnwgfWytor6Dz7aJ9c56Yze2sAiiHGOkjqo1MmaQJ_Fy4NG5/exec",
-        // NOTA: GARANTIA_APP é opcional — EmailService.js usa SUPERVISOR_APP como fallback
-        // Se precisar de URL separada para Compras, adicionar aqui
-        APPROVAL_FORM_BASE:
-            "https://docs.google.com/forms/d/e/1FAIpQLScZZX.../viewform?usp=pp_url"
+        SUPERVISOR_APP: loadConfigFromProperties().SUPERVISOR_APP_URL,
+        APPROVAL_FORM_BASE: loadConfigFromProperties().APPROVAL_FORM_BASE
     },
 
     /* 5. Arquivos / Drive */
     IDS: {
-        TEMPLATE_RELATORIO: "1yYOJC8yHLXaLGb8xhH-CiRjoc1NsFHZ7nP4fuifByZw",
-        TEMPLATE_FOTOS: "1aWOouZVyxxJxcbNLyA8H-THMNGe9bq6j7T4KhIi-Ig8",
-        OUTPUT_FOLDER: "1kFYjgACWaHMchJfIidz-0Jl05nYC4t7E",
+        TEMPLATE_RELATORIO: loadConfigFromProperties().TEMPLATE_RELATORIO_ID,
+        TEMPLATE_FOTOS: loadConfigFromProperties().TEMPLATE_FOTOS_ID,
+        OUTPUT_FOLDER: loadConfigFromProperties().OUTPUT_FOLDER_ID,
         PASTA_PDFS: null, // alias, será definido abaixo
         PASTA_RRT: null, // alias, será definido abaixo
-        LOGO_FILE: "10fbU-7wBE7dlu-1RzdIbendCaCMEgltf",
-        SHEET_ID: "1OgUSZSCBh54DUfuy8nvUYB2QZ2IR2o3UjUdnU2Gwj3E" 
+        LOGO_FILE: loadConfigFromProperties().LOGO_FILE_ID,
+        SHEET_ID: loadConfigFromProperties().SHEET_ID
     },
 
     /* 6. Formulários */
     FORMS: {
-        ENTRY_ROLO: "entry.817202283",
-        ENTRY_SUP: "entry.445468771",
-        ENTRY_DEC: "entry.2142081778"
+        ENTRY_ROLO: loadConfigFromProperties().FORM_ENTRY_ROLO,
+        ENTRY_SUP: loadConfigFromProperties().FORM_ENTRY_SUP,
+        ENTRY_DEC: loadConfigFromProperties().FORM_ENTRY_DEC
     },
 
-    GENERATE_ID: true
+    GENERATE_ID: loadConfigFromProperties().GENERATE_ID,
+    SECRET_KEY: loadConfigFromProperties().SECRET_KEY
 };
 
 /* -------------------------------------------------------------

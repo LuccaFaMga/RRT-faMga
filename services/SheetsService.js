@@ -123,50 +123,26 @@ var SheetsDatabaseService = (function () {
    * ============================ */
   function databaseQuery(q) {
     const startTime = new Date().getTime();
-    Logger.log('\n╔═════════════════════════════════════════════════╗');
-    Logger.log('║ [SHEETS-DB] databaseQuery INICIADA             ║');
-    Logger.log('╚═════════════════════════════════════════════════╝');
     
     try {
-      // Análise do parâmetro
-      Logger.log('[SHEETS-DB] 📥 Parâmetro recebido:');
-      Logger.log('[SHEETS-DB]   - Tipo: ' + typeof q);
-      Logger.log('[SHEETS-DB]   - JSON: ' + JSON.stringify(q));
-      
       // Resolução do nome da aba
       const tabName = SHEETS[q.collection.toUpperCase()] || q.collection;
-      Logger.log('[SHEETS-DB] 📋 Resolução da aba:');
-      Logger.log('[SHEETS-DB]   - Input: "' + q.collection + '"');
-      Logger.log('[SHEETS-DB]   - Após normalize: "' + (q.collection || '').toUpperCase() + '"');
-      Logger.log('[SHEETS-DB]   - Resultado: "' + tabName + '"');
       
       // Carregamento da planilha
-      Logger.log('[SHEETS-DB] 📂 Abrindo planilha...');
       const sh = getSheet(tabName);
-      Logger.log('[SHEETS-DB] ✅ Planilha aberta');
       
       // Leitura dos headers
-      Logger.log('[SHEETS-DB] 🔤 Lendo headers...');
       const headers = getHeaders(sh);
-      Logger.log('[SHEETS-DB] Headers encontrados: ' + JSON.stringify(headers.slice(0, 5)) + '...');
-      Logger.log('[SHEETS-DB] Total de colunas: ' + headers.length);
       
       // Carregamento das linhas
-      Logger.log('[SHEETS-DB] 📊 Carregando dados...');
       const lastRow = sh.getLastRow();
-      Logger.log('[SHEETS-DB] Última linha: ' + lastRow);
       
       if (lastRow < 2) {
-        Logger.log('[SHEETS-DB] ⚠️ Nenhum dado encontrado (lastRow < 2)');
         return [];
       }
       
       const rowRange = sh.getRange(2, 1, lastRow - 1, headers.length);
       const values = rowRange.getValues();
-      Logger.log('[SHEETS-DB] Linhas carregadas: ' + values.length);
-      
-      // Conversão para objetos
-      Logger.log('[SHEETS-DB] 🔄 Convertendo linhas para objetos...');
       const rows = values.map(function(r) {
         return rowToObject(headers, r);
       });

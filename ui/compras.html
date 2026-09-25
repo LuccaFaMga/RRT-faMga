@@ -1,0 +1,277 @@
+﻿<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FA Maringa - Compras</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --primary: #0b63ff; --primary-dark: #0052d9;
+            --secondary: #e02424; --success: #16a34a; --warning: #f59e0b;
+            --text: #1f2937; --text-secondary: #6b7280;
+            --bg: #ffffff; --bg-secondary: #f9fafb; --border: #e5e7eb;
+            --shadow-sm: 0 1px 2px 0 rgba(0,0,0,0.05);
+            --shadow-base: 0 4px 12px 0 rgba(0,0,0,0.08);
+            --radius: 12px; --radius-lg: 16px;
+            --transition: all 0.3s cubic-bezier(0.4,0,0.2,1);
+        }
+        body { font-family: 'Inter', sans-serif; background: var(--bg-secondary); color: var(--text); min-height: 100vh; display: flex; flex-direction: column; }
+        .header { background: var(--bg); padding: 1.25rem 2rem; box-shadow: var(--shadow-sm); display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); }
+        .header h1 { font-size: 1.3rem; font-weight: 700; color: var(--primary); display: flex; align-items: center; gap: 0.5rem; }
+        .header-user { font-size: 0.875rem; color: var(--text-secondary); }
+        .container { max-width: 860px; margin: 1.5rem auto; padding: 0 1rem; flex: 1; width: 100%; }
+        .card { background: var(--bg); border-radius: var(--radius-lg); padding: 1.75rem; box-shadow: var(--shadow-base); margin-bottom: 1.25rem; border: 1px solid var(--border); }
+        .card h2 { font-size: 1.1rem; font-weight: 600; margin-bottom: 1.25rem; color: var(--text); display: flex; align-items: center; gap: 0.5rem; }
+        .info-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0.75rem; margin-bottom: 1.5rem; }
+        .info-item { background: var(--bg-secondary); padding: 0.875rem 1rem; border-radius: var(--radius); border: 1px solid var(--border); }
+        .info-item label { display: block; font-size: 0.72rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase; letter-spacing: 0.4px; margin-bottom: 0.3rem; }
+        .info-item span { font-weight: 600; color: var(--text); font-size: 0.95rem; }
+        .badge { display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.3rem 0.75rem; border-radius: 999px; font-size: 0.78rem; font-weight: 700; text-transform: uppercase; }
+        .badge-reprovado { background: #fee2e2; color: #991b1b; }
+        .badge-aprovado  { background: #dcfce7; color: #166534; }
+        .badge-pendente  { background: #fef3c7; color: #92400e; }
+        .form-group { margin-bottom: 1rem; }
+        .form-group label { display: block; font-size: 0.82rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 0.4rem; text-transform: uppercase; letter-spacing: 0.3px; }
+        select, textarea { width: 100%; border: 1px solid var(--border); border-radius: var(--radius); padding: 0.75rem 1rem; font-family: 'Inter', sans-serif; font-size: 0.9rem; color: var(--text); background: var(--bg-secondary); }
+        select:focus, textarea:focus { outline: none; border-color: var(--primary); background: white; }
+        textarea { resize: vertical; min-height: 90px; }
+        .checkbox-label { display: flex; align-items: center; gap: 0.5rem; font-size: 0.9rem; cursor: pointer; }
+        input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--primary); cursor: pointer; }
+        .btn { display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem; padding: 0.75rem 1.5rem; border-radius: var(--radius); font-weight: 600; font-size: 0.9rem; cursor: pointer; transition: var(--transition); border: none; font-family: 'Inter', sans-serif; min-width: 140px; }
+        .btn:disabled { opacity: 0.6; cursor: not-allowed; }
+        .btn-success { background: var(--success); color: white; }
+        .btn-success:hover:not(:disabled) { background: #15803d; transform: translateY(-1px); }
+        .btn-danger  { background: var(--secondary); color: white; }
+        .btn-danger:hover:not(:disabled)  { background: #dc2626; transform: translateY(-1px); }
+        .btn-warning { background: var(--warning); color: white; }
+        .btn-warning:hover:not(:disabled) { background: #d97706; transform: translateY(-1px); }
+        .btn-group { display: flex; gap: 0.75rem; flex-wrap: wrap; margin-top: 1.5rem; }
+        .alert { padding: 1rem 1.25rem; border-radius: var(--radius); margin-bottom: 1rem; display: flex; align-items: flex-start; gap: 0.75rem; font-size: 0.9rem; }
+        .alert-error   { background: #fee2e2; color: #991b1b; border: 1px solid #fecaca; }
+        .alert-success { background: #dcfce7; color: #166534; border: 1px solid #bbf7d0; }
+        .alert-warning { background: #fef3c7; color: #92400e; border: 1px solid #fde68a; }
+        .alert-info    { background: #e0f2fe; color: #0369a1; border: 1px solid #bae6fd; }
+        .alert i { margin-top: 2px; flex-shrink: 0; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .spinner-btn { animation: spin 0.8s linear infinite; }
+        #ressalvasGroup { display: none; margin-top: 0.75rem; padding: 1rem; background: #fffbeb; border: 1px solid #fde68a; border-radius: var(--radius); }
+        @media (max-width: 600px) { .container { padding: 0 0.75rem; margin-top: 1rem; } .btn-group { flex-direction: column; } .btn { width: 100%; } }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1><i class="fas fa-shopping-cart"></i> Compras - Revisao de Tecidos</h1>
+        <div class="header-user"><i class="fas fa-user-circle"></i> <?= COMPRADOR_NOME ?></div>
+    </div>
+
+    <div class="container">
+        <div id="feedbackBanner" style="display:none;"></div>
+
+        <? if (roll) { ?>
+        <!-- Informacoes do Rolo -->
+        <div class="card">
+            <h2><i class="fas fa-info-circle"></i> Informacoes do Rolo</h2>
+            <div class="info-grid">
+                <div class="info-item"><label>ID do Rolo</label><span><?= idRolo ?></span></div>
+                <div class="info-item">
+                    <label>Status Supervisor</label>
+                    <span>
+                        <span class="badge badge-reprovado"><i class="fas fa-times"></i> <?= statusSupervisor || 'Reprovado' ?></span>
+                    </span>
+                </div>
+                <div class="info-item"><label>Defeitos Encontrados</label><span><?= defeitosEncontrados ?></span></div>
+                <div class="info-item"><label>Localizacao</label><span><?= localizador || '&mdash;' ?></span></div>
+                <? if (roll.fornecedor || roll.FORNECEDOR) { ?><div class="info-item"><label>Fornecedor</label><span><?= roll.fornecedor || roll.FORNECEDOR ?></span></div><? } ?>
+                <? if (roll.metros_revisado || roll.METROS_REVISADO) { ?><div class="info-item"><label>Metros Revisados</label><span><?= roll.metros_revisado || roll.METROS_REVISADO ?> m</span></div><? } ?>
+                <? if (roll.pontos_100m2 || roll.PONTOS_100M2) { ?><div class="info-item"><label>Pontos/100m&sup2;</label><span><?= roll.pontos_100m2 || roll.PONTOS_100M2 ?></span></div><? } ?>
+                <? if (roll.motivo_reprovacao_supervisor || roll.MOTIVO_REPROVACAO_SUPERVISOR) { ?>
+                <div class="info-item" style="grid-column: 1/-1;"><label>Motivo da Reprovacao pelo Supervisor</label><span><?= roll.motivo_reprovacao_supervisor || roll.MOTIVO_REPROVACAO_SUPERVISOR ?></span></div>
+                <? } ?>
+            </div>
+
+            <div class="alert alert-warning">
+                <i class="fas fa-exclamation-triangle"></i>
+                <div>Este tecido foi <strong>reprovado pelo Supervisor</strong>. Analise os dados e registre a decisao do setor de Compras.</div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2><i class="fas fa-file-pdf"></i> Relatorio para Compras</h2>
+            <p style="color:var(--text-secondary);font-size:0.9rem;margin-bottom:1rem;">Adicione as informacoes do setor de Compras e gere o PDF deste caso.</p>
+            <div class="form-group">
+                <label for="informacoesPdf">Informacoes adicionais</label>
+                <textarea id="informacoesPdf" placeholder="Inclua analise, orientacoes, negociacao ou outras informacoes relevantes..."></textarea>
+            </div>
+            <div class="btn-group" style="margin-top:0.5rem;">
+                <button class="btn btn-primary" id="btnGerarPdf" onclick="generateComprasPdf()">
+                    <i class="fas fa-file-pdf"></i> Gerar PDF
+                </button>
+                <a class="btn btn-secondary" id="linkPdf" href="<?= roll.compras_pdf_url || roll.pdf_reprovacao_url || '' ?>" target="_blank" style="display:<?= (roll.compras_pdf_url || roll.pdf_reprovacao_url) ? 'inline-flex' : 'none' ?>; text-decoration:none;">
+                    <i class="fas fa-external-link-alt"></i> Abrir PDF atual
+                </a>
+            </div>
+        </div>
+
+        <!-- Decisao de Compras -->
+        <div class="card">
+            <h2><i class="fas fa-gavel"></i> Decisao de Compras</h2>
+
+            <div class="form-group">
+                <label for="tipoDecisao">Tipo de Decisao</label>
+                <select id="tipoDecisao" onchange="onTipoDecisaoChange()">
+                    <option value="aprovacao_total">Aprovacao Total</option>
+                    <option value="uso_com_ressalvas">Uso com Ressalvas</option>
+                    <option value="devolucao">Devolucao ao Fornecedor</option>
+                    <option value="desconto">Negociar Desconto</option>
+                    <option value="reprovado_definitivo">Reprovacao Definitiva</option>
+                </select>
+            </div>
+
+            <div id="ressalvasGroup" class="form-group">
+                <label for="motivoRessalvas">Condicoes para Uso com Ressalvas</label>
+                <textarea id="motivoRessalvas" placeholder="Descreva as condicoes e restricoes para uso do material..."></textarea>
+            </div>
+
+            <div class="form-group">
+                <label for="observacoes">Observacoes</label>
+                <textarea id="observacoes" placeholder="Adicione observacoes sobre a decisao tomada..."></textarea>
+            </div>
+
+            <div class="form-group">
+                <label class="checkbox-label">
+                    <input type="checkbox" id="voltarEstoque" checked>
+                    Retornar ao estoque apos aprovacao
+                </label>
+            </div>
+
+            <div class="btn-group">
+                <button class="btn btn-success" id="btnAprovar" onclick="submitDecision('APROVADO_COMPRAS')">
+                    <i class="fas fa-check"></i> Aprovar
+                </button>
+                <button class="btn btn-warning" id="btnRessalvas" onclick="submitDecision('APROVADO_COMPRAS', true)">
+                    <i class="fas fa-exclamation-triangle"></i> Aprovar com Ressalvas
+                </button>
+                <button class="btn btn-danger" id="btnReprovar" onclick="submitDecision('REPROVADO_COMPRAS')">
+                    <i class="fas fa-times"></i> Reprovar Definitivamente
+                </button>
+            </div>
+        </div>
+
+        <? } else { ?>
+        <div class="alert alert-error">
+            <i class="fas fa-exclamation-circle"></i>
+            <div><strong>Rolo nao encontrado.</strong> Verifique o link ou o ID do rolo.</div>
+        </div>
+        <? } ?>
+    </div>
+
+    <script>
+        var ROLO_ID      = '<?= idRolo ?>';
+        var COMPRADOR    = '<?= COMPRADOR_NOME ?>';
+
+        function onTipoDecisaoChange() {
+            var tipo = document.getElementById('tipoDecisao').value;
+            document.getElementById('ressalvasGroup').style.display =
+                (tipo === 'uso_com_ressalvas') ? 'block' : 'none';
+        }
+
+        function generateComprasPdf() {
+            var info = (document.getElementById('informacoesPdf').value || '').trim();
+            setLoading(true, 'btnGerarPdf');
+            google.script.run
+                .withSuccessHandler(function(r) {
+                    setLoading(false, 'btnGerarPdf');
+                    if (r && (r.status === 'SUCESSO' || r.status === 'OK') && r.pdfUrl) {
+                        var link = document.getElementById('linkPdf');
+                        link.href = r.pdfUrl;
+                        link.style.display = 'inline-flex';
+                        showFeedback('success', 'PDF gerado com sucesso.');
+                        window.open(r.pdfUrl, '_blank');
+                    } else {
+                        showFeedback('error', (r && r.message) ? r.message : 'Nao foi possivel gerar o PDF.');
+                    }
+                })
+                .withFailureHandler(function(e) {
+                    setLoading(false, 'btnGerarPdf');
+                    showFeedback('error', 'Erro de comunicacao: ' + ((e && e.message) ? e.message : String(e)));
+                })
+                .generateComprasPDF_Web({ idRolo: ROLO_ID, informacoesAdicionais: info, comprador: COMPRADOR });
+        }
+
+        function submitDecision(statusFinal, isRessalvas) {
+            var tipo = document.getElementById('tipoDecisao').value;
+            var obs  = (document.getElementById('observacoes').value || '').trim();
+            var motivo = (document.getElementById('motivoRessalvas').value || '').trim();
+            var voltarEstoque = document.getElementById('voltarEstoque').checked;
+
+            // Validacao de ressalvas
+            if (isRessalvas && !motivo) {
+                showFeedback('warning', 'Informe as condicoes para uso com ressalvas.');
+                return;
+            }
+
+            // Desabilita botoes e mostra loading
+            setLoading(true, 'btnAprovar', 'btnRessalvas', 'btnReprovar');
+
+            var payload = {
+                idRolo:          ROLO_ID,
+                statusFinal:     statusFinal,
+                tipoDecisao:     isRessalvas ? 'uso_com_ressalvas' : tipo,
+                comprador:       COMPRADOR,
+                observacoes:     obs,
+                motivoRessalvas: motivo,
+                voltarEstoque:   voltarEstoque
+            };
+
+            google.script.run
+                .withSuccessHandler(function(r) {
+                    setLoading(false, 'btnAprovar', 'btnRessalvas', 'btnReprovar');
+                    if (r && (r.status === 'SUCESSO' || r.status === 'OK')) {
+                        showFeedback('success', 'Decisao registrada com sucesso! Status: ' + (r.fase_atual || statusFinal));
+                        disableActions();
+                    } else {
+                        showFeedback('error', (r && r.message) ? r.message : 'Erro desconhecido ao registrar decisao.');
+                    }
+                })
+                .withFailureHandler(function(e) {
+                    setLoading(false, 'btnAprovar', 'btnRessalvas', 'btnReprovar');
+                    showFeedback('error', 'Erro de comunicacao: ' + ((e && e.message) ? e.message : String(e)));
+                })
+                .processarDecisaoCompras(payload);
+        }
+
+        function setLoading(loading) {
+            for (var i = 1; i < arguments.length; i++) {
+                var btn = document.getElementById(arguments[i]);
+                if (!btn) continue;
+                btn.disabled = loading;
+                var icon = btn.querySelector('i');
+                if (icon) {
+                    if (loading) { icon.dataset.orig = icon.className; icon.className = 'fas fa-spinner spinner-btn'; }
+                    else if (icon.dataset.orig) { icon.className = icon.dataset.orig; }
+                }
+            }
+        }
+
+        function disableActions() {
+            ['btnAprovar','btnRessalvas','btnReprovar'].forEach(function(id) {
+                var b = document.getElementById(id); if (b) b.disabled = true;
+            });
+        }
+
+        function showFeedback(type, message) {
+            var b = document.getElementById('feedbackBanner');
+            if (!b) return;
+            var classes = { success:'alert-success', error:'alert-error', warning:'alert-warning', info:'alert-info' };
+            var icons   = { success:'fa-check-circle', error:'fa-exclamation-circle', warning:'fa-exclamation-triangle', info:'fa-info-circle' };
+            b.className = 'alert ' + (classes[type] || 'alert-info');
+            b.innerHTML = '<i class="fas ' + (icons[type] || 'fa-info-circle') + '"></i><div>' + message + '</div>';
+            b.style.display = 'flex';
+            b.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+    </script>
+</body>
+</html>

@@ -22,8 +22,8 @@ var ComprasController = (function () {
   const VALID_DECISIONS = ["APROVADO_COMPRAS", "REPROVADO_COMPRAS"];
 
   const NEXT_PHASE = {
-    "APROVADO_COMPRAS": "em_estoque",
-    "REPROVADO_COMPRAS": "finalizado_reprovado"
+    "APROVADO_COMPRAS": "aprovado_compras",
+    "REPROVADO_COMPRAS": "reprovado_compras"
   };
 
   const ALLOWED_FROM = "enviado_compras";
@@ -81,11 +81,7 @@ var ComprasController = (function () {
      ============================================================ */
 
   function processarDecisaoCompras(payload) {
-    const lock = LockService.getScriptLock();
-
     try {
-      lock.waitLock(5000);
-
       if (!payload || typeof payload !== "object") {
         throw new Error("Payload inválido.");
       }
@@ -160,6 +156,7 @@ var ComprasController = (function () {
         notas: observacoes || `Decisão Compras: ${statusFinal}`,
         force
       });
+      let transicaoFinal = transicao;
 
       const comprasData = {
         status_rolo: statusFinal,
@@ -181,7 +178,7 @@ var ComprasController = (function () {
           comprasData.motivo_ressalvas = motivoRessalvas || respostaCompras || "Aprovado para uso com ressalvas";
         }
         DatabaseService.rolls.update(id, comprasData);
-        WorkflowService.transition(id, "em_estoque", {
+        transicaoFinal = WorkflowService.transition(id, "em_estoque", {
           usuario: comprador,
           notas: comprasData.disponivel_com_ressalvas
             ? "Movido para estoque com ressalvas"
@@ -190,7 +187,7 @@ var ComprasController = (function () {
         });
       } else if (nextPhase === "reprovado_compras") {
         DatabaseService.rolls.update(id, comprasData);
-        WorkflowService.transition(id, "finalizado_reprovado", {
+        transicaoFinal = WorkflowService.transition(id, "finalizado_reprovado", {
           usuario: comprador,
           notas: "Reprovado definitivamente pelo setor de compras",
           force
@@ -209,7 +206,7 @@ var ComprasController = (function () {
       return {
         status: "OK",
         id: id,
-        fase_final: transicao?.para || nextPhase
+        fase_final: transicaoFinal?.para || nextPhase
       };
 
     } catch (e) {
@@ -220,8 +217,6 @@ var ComprasController = (function () {
         message: e.message
       };
 
-    } finally {
-      try { lock.releaseLock(); } catch (e) {}
     }
   }
 
