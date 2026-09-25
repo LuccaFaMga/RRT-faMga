@@ -1,0 +1,399 @@
+<style>
+/* LeitorQr — specs/001-leitor-qr. Prefixo lqr- para não colidir com o CSS das telas. */
+.lqr{position:fixed;inset:0;z-index:2147483000;background:#000;color:#fff;display:flex;flex-direction:column;font:16px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-tap-highlight-color:transparent}
+.lqr video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.lqr-moldura{position:absolute;left:50%;top:50%;width:min(64vw,64vh);aspect-ratio:1/1;transform:translate(-50%,-50%);border:3px solid rgba(255,255,255,.92);border-radius:18px;box-shadow:0 0 0 100vmax rgba(0,0,0,.42);transition:border-color .15s}
+.lqr-moldura.lqr-lido{border-color:#22c55e}
+.lqr-topo{position:relative;display:flex;justify-content:space-between;gap:8px;padding:calc(12px + env(safe-area-inset-top,0px)) 16px 0}
+.lqr-status{position:relative;margin:auto 0 0;padding:0 16px 10px;text-align:center;min-height:3em;text-shadow:0 1px 3px #000}
+.lqr-acoes{position:relative;display:grid;gap:10px;padding:0 16px calc(16px + env(safe-area-inset-bottom,0px))}
+.lqr button{min-height:52px;border:0;border-radius:12px;padding:0 18px;font:600 17px system-ui,-apple-system,Roboto,sans-serif;cursor:pointer}
+.lqr button:focus-visible{outline:3px solid #60a5fa;outline-offset:2px}
+.lqr-foto{background:#fff;color:#111}
+.lqr-foto.lqr-destaque{background:#facc15;color:#111;animation:lqr-pulso .9s ease-in-out 3}
+.lqr-sec{background:rgba(255,255,255,.18);color:#fff}
+.lqr-icone{min-width:52px;background:rgba(0,0,0,.5);color:#fff}
+.lqr-icone[aria-pressed="true"]{background:#facc15;color:#111}
+@keyframes lqr-pulso{50%{transform:scale(1.04)}}
+@media (prefers-reduced-motion:reduce){.lqr-foto.lqr-destaque{animation:none}}
+</style>
+<script>
+/**
+ * LeitorQr — lê o QR da etiqueta do rolo. specs/001-leitor-qr/plan.md
+ *
+ *   const r = await LeitorQr.abrir();
+ *   r.origem === 'video' | 'foto'  → r.texto é o conteúdo do QR
+ *   r.origem === 'digitado'        → o revisor escolheu digitar; r.texto é null
+ *   r.ms                           → tempo desde a abertura até a leitura
+ *   Cancelar rejeita com Error('Cancelado pelo usuário'), name 'AbortError'.
+ *
+ * Degraus: (1) vídeo com recorte central em resolução cheia + BarcodeDetector nativo;
+ * (2) foto pela câmera nativa do celular; (3) digitação.
+ * jsQR só é carregado (via google.script.run.include) se o BarcodeDetector não existir.
+ */
+const LeitorQr = (function () {
+  'use strict';
+
+  const INTERVALO_MS = 120;        // ~8 leituras/s com BarcodeDetector
+  const INTERVALO_JSQR_MS = 250;   // jsQR é mais pesado
+  const DICA_FOTO_MS = 4000;       // RF-002
+  const FRACAO_RECORTE = 0.62;     // lado do recorte = 62% do menor lado do vídeo (~670 px em 1080p)
+  const MAX_LADO_FOTO = 2400;
+  const MAX_LADO_JSQR = 1600;
+  const ARQUIVO_JSQR = 'src/client/comum/jsqr';
+
+  let sessaoAtual = null;
+  let detectorPromise = null;
+  let jsqrPromise = null;
+
+  // ---------------------------------------------------------------- decodificação
+
+  function obterDetector() {
+    if (!detectorPromise) {
+      detectorPromise = (async () => {
+        if (!('BarcodeDetector' in window)) return null;
+        try {
+          if (BarcodeDetector.getSupportedFormats) {
+            const formatos = await BarcodeDetector.getSupportedFormats();
+            if (!formatos.includes('qr_code')) return null;
+          }
+          return new BarcodeDetector({ formats: ['qr_code'] });
+        } catch (e) {
+          return null;
+        }
+      })();
+    }
+    return detectorPromise;
+  }
+
+  function carregarJsQr() {
+    if (window.jsQR) return Promise.resolve(window.jsQR);
+    if (!jsqrPromise) {
+      jsqrPromise = new Promise((ok, falha) => {
+        if (!(window.google && google.script && google.script.run)) {
+          falha(new Error('jsQR indisponível fora do Apps Script'));
+          return;
+        }
+        google.script.run
+          .withSuccessHandler((html) => {
+            try {
+              const codigo = String(html)
+                .replace(/^[\s\S]*?<script[^>]*>/i, '')
+                .replace(/<\/script>[\s\S]*$/i, '');
+              const s = document.createElement('script');
+              s.textContent = codigo;
+              document.head.appendChild(s);
+              window.jsQR ? ok(window.jsQR) : falha(new Error('jsQR não carregou'));
+            } catch (e) {
+              falha(e);
+            }
+          })
+          .withFailureHandler(falha)
+          .include(ARQUIVO_JSQR);
+      }).catch((e) => {
+        jsqrPromise = null;
+        throw e;
+      });
+    }
+    return jsqrPromise;
+  }
+
+  function maisCentral(codigos, largura, altura) {
+    let melhor = codigos[0];
+    let menor = Infinity;
+    for (const c of codigos) {
+      const b = c.boundingBox;
+      if (!b) continue;
+      const d = Math.hypot(b.x + b.width / 2 - largura / 2, b.y + b.height / 2 - altura / 2);
+      if (d < menor) { menor = d; melhor = c; }
+    }
+    return melhor;
+  }
+
+  /** @param fonte canvas ou ImageBitmap com as dimensões largura × altura */
+  async function decodificar(fonte, largura, altura) {
+    const detector = await obterDetector();
+    if (detector) {
+      const achados = await detector.detect(fonte);
+      return achados.length ? maisCentral(achados, largura, altura).rawValue : null;
+    }
+    const jsQR = await carregarJsQr();
+    const escala = Math.min(1, MAX_LADO_JSQR / Math.max(largura, altura));
+    const w = Math.round(largura * escala);
+    const h = Math.round(altura * escala);
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(fonte, 0, 0, w, h);
+    const r = jsQR(ctx.getImageData(0, 0, w, h).data, w, h, { inversionAttempts: 'dontInvert' });
+    return r ? r.data : null;
+  }
+
+  // ---------------------------------------------------------------- sessão
+
+  function criarSessao(resolver, rejeitar) {
+    const inicio = performance.now();
+    const raiz = document.createElement('div');
+    raiz.className = 'lqr';
+    raiz.setAttribute('role', 'dialog');
+    raiz.setAttribute('aria-modal', 'true');
+    raiz.setAttribute('aria-label', 'Ler etiqueta do rolo');
+    raiz.innerHTML =
+      '<video playsinline muted></video>' +
+      '<div class="lqr-moldura" aria-hidden="true"></div>' +
+      '<div class="lqr-topo">' +
+      '  <button type="button" class="lqr-icone lqr-fechar" aria-label="Cancelar leitura">✕</button>' +
+      '  <button type="button" class="lqr-icone lqr-lanterna" aria-pressed="false" hidden>Lanterna</button>' +
+      '</div>' +
+      '<p class="lqr-status" aria-live="polite">Abrindo a câmera…</p>' +
+      '<div class="lqr-acoes">' +
+      '  <button type="button" class="lqr-foto">Fotografar etiqueta</button>' +
+      '  <button type="button" class="lqr-sec lqr-digitar">Digitar dados</button>' +
+      '</div>' +
+      '<input type="file" accept="image/*" capture="environment" hidden>';
+
+    const el = (sel) => raiz.querySelector(sel);
+    const video = el('video');
+    const moldura = el('.lqr-moldura');
+    const status = el('.lqr-status');
+    const btnFoto = el('.lqr-foto');
+    const btnLanterna = el('.lqr-lanterna');
+    const entrada = el('input');
+
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d', { alpha: false });
+
+    let stream = null;
+    let track = null;
+    let encerrada = false;
+    let ocupado = false;
+    let ultimaLeitura = 0;
+    let intervalo = INTERVALO_MS;
+    let timerDica = null;
+    let timerLoop = null;
+    let capturandoFoto = false;
+
+    function mostrar(msg) { status.textContent = msg; }
+
+    function destacarFoto(msg) {
+      btnFoto.classList.add('lqr-destaque');
+      if (msg) mostrar(msg);
+    }
+
+    async function iniciarCamera() {
+      mostrar('Abrindo a câmera…');
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: false,
+          video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } },
+        });
+      } catch (e) {
+        stream = null;
+        destacarFoto(mensagemErroCamera(e));
+        return;
+      }
+      if (encerrada) { pararCamera(); return; }
+      track = stream.getVideoTracks()[0];
+      video.srcObject = stream;
+      try { await video.play(); } catch (e) { /* autoplay: segue mesmo assim */ }
+      ajustarCamera();
+      const nativo = Boolean(await obterDetector());
+      intervalo = nativo ? INTERVALO_MS : INTERVALO_JSQR_MS;
+      mostrar(nativo
+        ? 'Aponte para o QR da etiqueta, a um palmo de distância'
+        : 'Aponte para o QR da etiqueta. Dica: atualize o Chrome para ler mais rápido.');
+      clearTimeout(timerDica);
+      timerDica = setTimeout(() => destacarFoto('Não leu? Toque em “Fotografar etiqueta” e tire a foto de perto.'), DICA_FOTO_MS);
+      agendar();
+    }
+
+    function ajustarCamera() {
+      if (!track || !track.getCapabilities) return;
+      const caps = track.getCapabilities();
+      if (Array.isArray(caps.focusMode) && caps.focusMode.includes('continuous')) {
+        track.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }).catch(() => {});
+      }
+      btnLanterna.hidden = !caps.torch;
+    }
+
+    function pararCamera() {
+      clearTimeout(timerLoop);
+      clearTimeout(timerDica);
+      if (stream) stream.getTracks().forEach((t) => t.stop());
+      stream = null;
+      track = null;
+      video.srcObject = null;
+      btnLanterna.setAttribute('aria-pressed', 'false');
+    }
+
+    function agendar() {
+      if (encerrada || !stream) return;
+      if (video.requestVideoFrameCallback) video.requestVideoFrameCallback(quadro);
+      else timerLoop = setTimeout(quadro, INTERVALO_MS);
+    }
+
+    async function quadro() {
+      if (encerrada || !stream) return;
+      const agora = performance.now();
+      if (ocupado || agora - ultimaLeitura < intervalo || video.readyState < 2) { agendar(); return; }
+      ocupado = true;
+      ultimaLeitura = agora;
+      try {
+        const vw = video.videoWidth;
+        const vh = video.videoHeight;
+        const lado = Math.round(Math.min(vw, vh) * FRACAO_RECORTE);
+        if (canvas.width !== lado) { canvas.width = lado; canvas.height = lado; }
+        // recorte central SEM redução: o QR pequeno precisa dos pixels
+        ctx.drawImage(video, (vw - lado) / 2, (vh - lado) / 2, lado, lado, 0, 0, lado, lado);
+        const texto = await decodificar(canvas, lado, lado);
+        if (texto) { concluir({ texto, origem: 'video' }); return; }
+      } catch (e) {
+        if (!(await obterDetector())) {
+          pararCamera();
+          destacarFoto('Leitura ao vivo indisponível neste navegador. Fotografe a etiqueta ou digite os dados.');
+          return;
+        }
+      } finally {
+        ocupado = false;
+      }
+      agendar();
+    }
+
+    async function lerFoto(arquivo) {
+      mostrar('Lendo a foto…');
+      let bitmap = null;
+      try {
+        bitmap = await createImageBitmap(arquivo);
+        let { width: w, height: h } = bitmap;
+        if (Math.max(w, h) > MAX_LADO_FOTO) {
+          const escala = MAX_LADO_FOTO / Math.max(w, h);
+          bitmap.close();
+          w = Math.round(w * escala);
+          h = Math.round(h * escala);
+          bitmap = await createImageBitmap(arquivo, { resizeWidth: w, resizeHeight: h, resizeQuality: 'high' });
+        }
+        let texto = await decodificar(bitmap, w, h);
+        if (!texto) {
+          // segunda tentativa: centro da foto na resolução original
+          const original = await createImageBitmap(arquivo);
+          const lado = Math.round(Math.min(original.width, original.height) * 0.6);
+          const sx = Math.round((original.width - lado) / 2);
+          const sy = Math.round((original.height - lado) / 2);
+          original.close();
+          const alvo = Math.min(lado, MAX_LADO_FOTO);
+          const centro = await createImageBitmap(arquivo, sx, sy, lado, lado, { resizeWidth: alvo, resizeHeight: alvo, resizeQuality: 'high' });
+          texto = await decodificar(centro, alvo, alvo);
+          centro.close();
+        }
+        if (texto) { concluir({ texto, origem: 'foto' }); return; }
+        destacarFoto('Não encontrei o código nesta foto. Tente mais perto, com a etiqueta inteira na foto, ou digite os dados.');
+      } catch (e) {
+        destacarFoto('Não consegui abrir a foto. Tente de novo ou digite os dados.');
+      } finally {
+        if (bitmap) bitmap.close();
+      }
+      iniciarCamera();
+    }
+
+    function concluir(resultado) {
+      if (encerrada) return;
+      moldura.classList.add('lqr-lido');
+      if (navigator.vibrate) navigator.vibrate(80);
+      encerrar();
+      resolver(Object.assign({ ms: Math.round(performance.now() - inicio) }, resultado));
+    }
+
+    function cancelar() {
+      if (encerrada) return;
+      encerrar();
+      const erro = new Error('Cancelado pelo usuário');
+      erro.name = 'AbortError';
+      rejeitar(erro);
+    }
+
+    function encerrar() {
+      encerrada = true;
+      pararCamera();
+      document.removeEventListener('visibilitychange', aoMudarVisibilidade);
+      window.removeEventListener('pagehide', cancelar);
+      document.removeEventListener('keydown', aoTeclar);
+      raiz.remove();
+      sessaoAtual = null;
+    }
+
+    function aoMudarVisibilidade() {
+      // a câmera nativa (foto) esconde a página: não é saída do usuário
+      if (document.visibilityState === 'hidden' && !capturandoFoto) cancelar();
+    }
+
+    function aoTeclar(e) { if (e.key === 'Escape') cancelar(); }
+
+    el('.lqr-fechar').addEventListener('click', cancelar);
+    el('.lqr-digitar').addEventListener('click', () => concluir({ texto: null, origem: 'digitado' }));
+    btnLanterna.addEventListener('click', () => {
+      if (!track) return;
+      const ligar = btnLanterna.getAttribute('aria-pressed') !== 'true';
+      track.applyConstraints({ advanced: [{ torch: ligar }] })
+        .then(() => btnLanterna.setAttribute('aria-pressed', String(ligar)))
+        .catch(() => { btnLanterna.hidden = true; });
+    });
+    btnFoto.addEventListener('click', () => {
+      // libera a câmera antes de abrir a câmera nativa (o Android não compartilha)
+      pararCamera();
+      capturandoFoto = true;
+      entrada.value = '';
+      entrada.click();
+    });
+    entrada.addEventListener('change', () => {
+      capturandoFoto = false;
+      const arquivo = entrada.files && entrada.files[0];
+      arquivo ? lerFoto(arquivo) : iniciarCamera();
+    });
+    entrada.addEventListener('cancel', () => { capturandoFoto = false; iniciarCamera(); });
+
+    return {
+      iniciar() {
+        document.body.appendChild(raiz);
+        document.addEventListener('visibilitychange', aoMudarVisibilidade);
+        window.addEventListener('pagehide', cancelar);
+        document.addEventListener('keydown', aoTeclar);
+        el('.lqr-fechar').focus();
+        if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) iniciarCamera();
+        else destacarFoto('Este navegador não abre a câmera ao vivo. Fotografe a etiqueta ou digite os dados.');
+      },
+      cancelar,
+    };
+  }
+
+  function mensagemErroCamera(e) {
+    switch (e && e.name) {
+      case 'NotAllowedError':
+      case 'SecurityError':
+        return 'A câmera está bloqueada. No Chrome, toque no cadeado ao lado do endereço → Permissões → Câmera → Permitir. Ou fotografe a etiqueta.';
+      case 'NotFoundError':
+      case 'OverconstrainedError':
+        return 'Não encontrei a câmera traseira. Fotografe a etiqueta ou digite os dados.';
+      case 'NotReadableError':
+        return 'A câmera está em uso por outro aplicativo. Feche-o e tente de novo, ou fotografe a etiqueta.';
+      default:
+        return 'Não consegui abrir a câmera. Fotografe a etiqueta ou digite os dados.';
+    }
+  }
+
+  function abrir() {
+    if (sessaoAtual) return Promise.reject(new Error('O leitor já está aberto'));
+    return new Promise((resolver, rejeitar) => {
+      sessaoAtual = criarSessao(resolver, rejeitar);
+      sessaoAtual.iniciar();
+    });
+  }
+
+  function fechar() { if (sessaoAtual) sessaoAtual.cancelar(); }
+
+  /** true quando a leitura ao vivo usa o detector nativo (sem jsQR) */
+  function usaDetectorNativo() { return obterDetector().then(Boolean); }
+
+  return { abrir, fechar, usaDetectorNativo };
+})();
+</script>

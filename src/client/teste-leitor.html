@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<base target="_top">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Teste do leitor de etiqueta</title>
+<style>
+  :root { --fundo:#f4f5f7; --texto:#1c2230; --suave:#5b6477; --linha:#dde1e8; --ok:#1e7a4c; --ruim:#a6302b; --acao:#2e3f7f; }
+  * { box-sizing:border-box; }
+  body { margin:0; padding:16px; background:var(--fundo); color:var(--texto); font:16px/1.5 system-ui,-apple-system,Roboto,sans-serif; }
+  h1 { font-size:20px; margin:0 0 4px; }
+  p { margin:0 0 12px; color:var(--suave); }
+  .acoes { display:grid; gap:10px; margin:16px 0; }
+  button { min-height:52px; border:0; border-radius:12px; font:600 17px system-ui,sans-serif; }
+  #ler { background:var(--acao); color:#fff; }
+  .sec { background:#fff; color:var(--texto); border:1px solid var(--linha); }
+  .resumo { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-bottom:12px; }
+  .resumo div { background:#fff; border:1px solid var(--linha); border-radius:10px; padding:8px; text-align:center; }
+  .resumo b { display:block; font-size:22px; font-variant-numeric:tabular-nums; }
+  .resumo span { font-size:13px; color:var(--suave); }
+  ol { list-style:none; padding:0; margin:0; display:grid; gap:8px; }
+  li { background:#fff; border:1px solid var(--linha); border-left:4px solid var(--ok); border-radius:8px; padding:8px 10px; font-size:14px; }
+  li.lento, li.falha { border-left-color:var(--ruim); }
+  li code { display:block; color:var(--suave); word-break:break-all; font-size:12px; margin-top:4px; }
+  textarea { width:100%; min-height:120px; font:12px ui-monospace,monospace; }
+  #ambiente { font-size:13px; }
+</style>
+</head>
+<body>
+  <h1>Teste do leitor de etiqueta</h1>
+  <p>Leia as 20 etiquetas reais, uma por vez. Cada leitura fica registrada abaixo (tarefa 001-T17).</p>
+  <p id="ambiente"></p>
+
+  <div class="resumo">
+    <div><b id="total">0</b><span>leituras</span></div>
+    <div><b id="rapidas">0</b><span>até 3 s</span></div>
+    <div><b id="mediana">–</b><span>mediana</span></div>
+  </div>
+
+  <div class="acoes">
+    <button id="ler" type="button">Ler etiqueta</button>
+    <button id="copiar" class="sec" type="button">Copiar resultados</button>
+    <button id="limpar" class="sec" type="button">Apagar resultados</button>
+  </div>
+  <textarea id="saida" hidden readonly aria-label="Resultados para copiar"></textarea>
+
+  <ol id="lista"></ol>
+
+  <?!= include('src/client/comum/etiqueta'); ?>
+  <?!= include('src/client/comum/leitorQr'); ?>
+  <script>
+  (function () {
+    const CHAVE = 'rrt-teste-leitor';
+    let leituras = [];
+    try { leituras = JSON.parse(localStorage.getItem(CHAVE) || '[]'); } catch (e) { leituras = []; }
+
+    const $ = (id) => document.getElementById(id);
+
+    LeitorQr.usaDetectorNativo().then((nativo) => {
+      const chrome = (navigator.userAgent.match(/Chrome\/([\d.]+)/) || [])[1] || '?';
+      const mem = navigator.deviceMemory ? navigator.deviceMemory + ' GB' : '?';
+      $('ambiente').textContent = 'Chrome ' + chrome + ' · memória ' + mem + ' · detector ' + (nativo ? 'nativo' : 'jsQR (reserva)');
+    });
+
+    function salvar() { try { localStorage.setItem(CHAVE, JSON.stringify(leituras)); } catch (e) {} }
+
+    function render() {
+      const lista = $('lista');
+      lista.innerHTML = '';
+      leituras.slice().reverse().forEach((l, i) => {
+        const li = document.createElement('li');
+        const n = leituras.length - i;
+        li.className = l.origem === 'falha' ? 'falha' : (l.ms > 3000 ? 'lento' : '');
+        const campos = l.campos ? 'NF ' + (l.campos.nf || '–') + ' · produto ' + (l.campos.produtoId || '–') + ' · lote ' + (l.campos.lote || '–') : 'formato não reconhecido';
+        li.textContent = '#' + n + ' · ' + l.origem + ' · ' + (l.ms / 1000).toFixed(1) + ' s · ' + campos;
+        const code = document.createElement('code');
+        code.textContent = l.texto || '';
+        li.appendChild(code);
+        lista.appendChild(li);
+      });
+      const tempos = leituras.filter((l) => l.origem === 'video' || l.origem === 'foto').map((l) => l.ms).sort((a, b) => a - b);
+      $('total').textContent = leituras.length;
+      $('rapidas').textContent = tempos.filter((t) => t <= 3000).length;
+      $('mediana').textContent = tempos.length ? (tempos[Math.floor((tempos.length - 1) / 2)] / 1000).toFixed(1) + ' s' : '–';
+    }
+
+    $('ler').addEventListener('click', async () => {
+      try {
+        const r = await LeitorQr.abrir();
+        leituras.push({ origem: r.origem, ms: r.ms, texto: r.texto, campos: r.texto ? Etiqueta.interpretar(r.texto, r.origem) : null, em: new Date().toISOString() });
+      } catch (e) {
+        if (e.name !== 'AbortError') leituras.push({ origem: 'falha', ms: 0, texto: e.message, campos: null, em: new Date().toISOString() });
+      }
+      salvar();
+      render();
+    });
+
+    $('copiar').addEventListener('click', async () => {
+      const linhas = ['n\torigem\tms\tnf\tproduto\tlote\ttexto'].concat(leituras.map((l, i) =>
+        [i + 1, l.origem, l.ms, l.campos ? l.campos.nf : '', l.campos ? l.campos.produtoId : '', l.campos ? l.campos.lote : '', (l.texto || '').replace(/\s+/g, ' ')].join('\t')));
+      const texto = $('ambiente').textContent + '\n' + linhas.join('\n');
+      try {
+        await navigator.clipboard.writeText(texto);
+        $('copiar').textContent = 'Copiado';
+      } catch (e) {
+        $('saida').hidden = false;
+        $('saida').value = texto;
+        $('saida').select();
+      }
+    });
+
+    $('limpar').addEventListener('click', () => {
+      if ($('limpar').dataset.confirmar !== '1') {
+        $('limpar').dataset.confirmar = '1';
+        $('limpar').textContent = 'Toque de novo para apagar';
+        return;
+      }
+      leituras = [];
+      salvar();
+      render();
+      $('limpar').dataset.confirmar = '';
+      $('limpar').textContent = 'Apagar resultados';
+    });
+
+    render();
+  })();
+  </script>
+</body>
+</html>
