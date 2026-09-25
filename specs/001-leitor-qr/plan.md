@@ -1,6 +1,6 @@
 # Plano técnico: Leitor de QR leve
 
-**Spec:** `specs/001-leitor-qr/spec.md` · **Status:** Rascunho · **Data:** 2026-09-25
+**Spec:** `specs/001-leitor-qr/spec.md` · **Status:** Em desenvolvimento · **Data:** 2026-09-25
 
 ## Resumo
 
@@ -80,6 +80,26 @@ file → createImageBitmap(file, { resizeWidth: ≤ 2400 mantendo proporção })
 detector.detect(bitmap); se vazio, tentar no quadrado central ampliado 1× (um único retry)
 ```
 
+## Decisões tomadas na implementação (2026-09-25)
+
+- **Qual parser é o legado de referência:** o celular não usa o `parseQrCodeDataV2` do servidor para preencher
+  o formulário, e sim `App.parseQrPayload` em `ui/reviewer_core_js.html` (o servidor só entra quando o
+  cliente não reconhece o texto). Os dois divergem no formato posicional. A caracterização foi feita contra
+  o parser do **cliente**, congelado em `tests/fixtures/legado/parseQrPayload.js`.
+- **Etiqueta tem duas saídas:** `paraFormulario(texto)` devolve o formato do formulário legado, idêntico ao
+  antigo; `interpretar(texto, origem)` devolve o formato novo (`EtiquetaDados`). O campo de largura foi
+  chamado `largura` (sem unidade no nome) até a questão de unidades de `data-model.md` ser resolvida.
+- **Sem adaptador no servidor (001-T15 cancelada):** trocar `parseQrCodeData` do servidor pelo parser do
+  cliente mudaria o resultado no formato posicional. Esse caminho só roda como reserva e some na 002/003.
+- **Sem `URL` no código compartilhado:** o Apps Script não tem a classe `URL`; `Etiqueta.parametrosDaUrl`
+  faz o mesmo que `URLSearchParams` (testado).
+- **"Digitar"** devolve `{ origem: 'digitado' }`; na tela legada isso abre o preenchimento manual que já
+  existia (`handleManualEntryMode`). O formulário próprio de digitação fica para a 003.
+- **jsQR sob demanda** é carregado com `google.script.run.include('src/client/comum/jsqr')` só quando o
+  `BarcodeDetector` não existe.
+- **A câmera ao vivo é desligada antes de abrir a câmera nativa**, porque o Android não compartilha a câmera
+  entre o Chrome e o app de câmera.
+
 ## Riscos
 
 | Risco | Prob. | Mitigação |
@@ -87,6 +107,8 @@ detector.detect(bitmap); se vazio, tentar no quadrado central ampliado 1× (um �
 | `BarcodeDetector` ausente em algum aparelho | Média | jsQR sob demanda + dica do Chrome |
 | 1080p não disponível na câmera | Baixa | Aceitar o que vier; foto nativa cobre |
 | Cópia `Etiqueta` divergir | Baixa | Teste compara as duas |
+| Android fechar a aba do Chrome ao abrir a câmera nativa (pouca memória) | Média | Na tela legada nada se perde (a revisão ainda não começou); medir no Galaxy A na 001-T17 |
+| `BarcodeDetector` não testável no computador | Alta | Caminho nativo só é verificado no celular (001-T17); o caminho jsQR foi testado no Chromium com câmera simulada |
 
 ## Balanço de linhas
 

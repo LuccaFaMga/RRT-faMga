@@ -11,7 +11,7 @@ Fluxo do rolo (rev. 2): **revisor conclui → PDF + e-mail para compras → comp
 | Pasta | Entrega | spec | plan | tasks | Status |
 |---|---|---|---|---|---|
 | 000-refatoracao | Refatoração (mãe) | ✅ | ✅ | ✅ (Fase 0 + roteiro) | Esclarecida |
-| 001-leitor-qr | Leitor de QR leve | ✅ | ✅ | ✅ | Esclarecida |
+| 001-leitor-qr | Leitor de QR leve | ✅ | ✅ | ✅ | Em desenvolvimento (falta teste no celular) |
 | 002-base-servidor | Base do servidor | ✅ | — | — | Rascunho |
 | 003-tela-revisor | Tela do revisor | ✅ | — | — | Rascunho |
 | 004-tela-gerente | ~~Tela do gerente~~ | — | — | — | Cancelada |

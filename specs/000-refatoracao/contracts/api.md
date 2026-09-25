@@ -53,7 +53,7 @@ function api(acao, dados) → resultado | { erro: string }
 type EtiquetaDados = {
   fornecedorId, fornecedor, nf, produtoId, produtoFornecedor, lote,
   cor, padronagem, localizacao, composicao: string;
-  metrosFornecedor?: number; larguraCm?: number;
+  metrosFornecedor?: number; largura?: number;   // unidade a confirmar (data-model.md → Unidades)
   bruto: string;            // texto original lido do QR
   origem: 'video' | 'foto' | 'digitado';
 };
